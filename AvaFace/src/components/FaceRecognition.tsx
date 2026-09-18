@@ -33,6 +33,7 @@ import {
 } from '../services/FaceAnalyzer.ts';
 
 import './FaceRecognition.css';
+import type { AvatarRequest } from '../types/Avatar.ts';
 
 
 interface FaceScan {
@@ -824,8 +825,7 @@ const FaceRecognition: React.FC = () => {
     ESCANEAR ROSTO
   */
 
-  const scanFace =
-    (): void => {
+  const scanFace = async () => {
 
 
       const video =
@@ -970,6 +970,49 @@ const FaceRecognition: React.FC = () => {
           analysis
 
         };
+
+        const avatarRequest: AvatarRequest = {
+          image,
+
+          face: {
+            faceWidth: analysis.faceWidth,
+            faceHeight: analysis.faceHeight,
+            faceRatio: analysis.faceRatio,
+            faceShape: analysis.faceShape,
+            eyeDistance: analysis.eyeDistance
+          },
+
+          style: '3D'
+
+          
+        };
+
+        console.log('Avatar Request:', avatarRequest);
+
+        try {
+          const response = await fetch(
+            'http://localhost:3000/api/avatar/generate',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(avatarRequest)
+            }
+          );
+
+          const data = await response.json();
+
+          console.log('Resposta do Backend:', data);
+
+        } catch (error) {
+
+          console.error(
+            'Erro ao enviar dados para o backend:',
+            error
+          );
+
+        }
 
         /*
           Salva Scan
@@ -1478,25 +1521,19 @@ const FaceRecognition: React.FC = () => {
 
               {/* IMAGE */}
 
-              <div
-                className="
-                  scan-image-container
-                "
-              >
+              <div className="scan-image-container scanned-container">
 
-                <img
-                  src={
-                    faceScan.image
-                  }
+                <div className="scanned-content">
 
-                  alt="
-                    Face Scan
-                  "
+                  <span className="scanned-icon">
+                    ✓
+                  </span>
 
-                  className="
-                    scan-image
-                  "
-                />
+                  <span className="scanned-text">
+                    SCANNED
+                  </span>
+
+                </div>
 
               </div>
 
@@ -1687,6 +1724,8 @@ const FaceRecognition: React.FC = () => {
   );
 
 };
+
+
 
 
 export default FaceRecognition;

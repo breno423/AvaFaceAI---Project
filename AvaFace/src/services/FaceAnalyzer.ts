@@ -23,6 +23,8 @@ export interface FaceAnalysis {
 
   faceShape: string;
 
+  eyeDistance: number;
+
 }
 
 
@@ -67,17 +69,14 @@ export function calculateFaceWidth(
 ): number {
 
   /*
-    FaceMesh landmarks:
+    MediaPipe Face Landmarker
 
-    234 = lado esquerdo
-
-    454 = lado direito
+    234 = lado esquerdo do rosto
+    454 = lado direito do rosto
   */
-
 
   const leftFace =
     landmarks[234];
-
 
   const rightFace =
     landmarks[454];
@@ -110,15 +109,14 @@ export function calculateFaceHeight(
 ): number {
 
   /*
-    10 = topo da testa
+    MediaPipe Face Landmarker
 
-    152 = queixo
+    10 = região superior da face
+    152 = região do queixo
   */
-
 
   const forehead =
     landmarks[10];
-
 
   const chin =
     landmarks[152];
@@ -137,6 +135,46 @@ export function calculateFaceHeight(
   return calculateDistance(
     forehead,
     chin
+  );
+
+}
+
+
+// ========================================
+// CALCULATE EYE DISTANCE
+// ========================================
+
+export function calculateEyeDistance(
+  landmarks: FaceLandmark[]
+): number {
+
+  /*
+    MediaPipe Face Landmarker
+
+    33  = região do olho esquerdo
+    263 = região do olho direito
+  */
+
+  const leftEye =
+    landmarks[33];
+
+  const rightEye =
+    landmarks[263];
+
+
+  if (
+    !leftEye ||
+    !rightEye
+  ) {
+
+    return 0;
+
+  }
+
+
+  return calculateDistance(
+    leftEye,
+    rightEye
   );
 
 }
@@ -173,15 +211,13 @@ export function detectFaceShape(
   ratio: number
 ): string {
 
-
   /*
     Regra inicial.
 
-    Vamos melhorar depois
-    adicionando mandíbula,
-    testa e maçãs do rosto.
+    Posteriormente podemos melhorar
+    utilizando mandíbula, testa,
+    maçãs do rosto e outras regiões.
   */
-
 
   if (
     ratio < 0.72
@@ -223,7 +259,6 @@ export function analyzeFace(
   landmarks: FaceLandmark[]
 ): FaceAnalysis {
 
-
   const faceWidth =
     calculateFaceWidth(
       landmarks
@@ -249,6 +284,12 @@ export function analyzeFace(
     );
 
 
+  const eyeDistance =
+    calculateEyeDistance(
+      landmarks
+    );
+
+
   return {
 
     faceWidth,
@@ -257,7 +298,9 @@ export function analyzeFace(
 
     faceRatio,
 
-    faceShape
+    faceShape,
+
+    eyeDistance
 
   };
 

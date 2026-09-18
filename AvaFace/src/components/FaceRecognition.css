@@ -250,6 +250,66 @@
     rgba(0, 0, 0, 0.6);
 }
 
+.scanned-container {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  background:
+    radial-gradient(
+      circle,
+      rgba(74, 222, 128, 0.15),
+      rgba(0, 0, 0, 0.8)
+    );
+}
+
+
+.scanned-content {
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  gap: 15px;
+}
+
+
+.scanned-icon {
+  width: 70px;
+
+  height: 70px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  border-radius: 50%;
+
+  border: 2px solid #4ade80;
+
+  color: #4ade80;
+
+  font-size: 32px;
+
+  font-weight: bold;
+}
+
+
+.scanned-text {
+  color: #4ade80;
+
+  font-size: 22px;
+
+  font-weight: 700;
+
+  letter-spacing: 4px;
+}
+
 
 /*
   VIDEO FICA ESCONDIDO.

@@ -1,0 +1,24 @@
+{
+  "name": "avaface-backend",
+  "version": "1.0.0",
+  "description": "Backend do AvaFace",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@huggingface/inference": "^4.13.30",
+    "cors": "^2.8.5",
+    "dotenv": "^18.0.0",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.0"
+  }
+}
