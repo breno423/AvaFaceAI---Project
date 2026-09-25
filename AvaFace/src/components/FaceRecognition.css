@@ -1,99 +1,269 @@
 /* ========================================
    AVAFACE - FACE RECOGNITION
+   Sistema de identidade visual + CSS profissional
+   (apenas classes já existentes no projeto foram usadas —
+   nenhum HTML/JSX precisa ser alterado)
 ======================================== */
 
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap');
+
+/* ========================================
+   DESIGN TOKENS
+======================================== */
+:root {
+  --bg: #0a0b10;
+  --surface: rgba(255, 255, 255, 0.04);
+  --surface-strong: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.09);
+
+  --text: #ffffff;
+  --text-muted: #9ca3af;
+  --text-faint: #6b7280;
+
+  --brand-a: #8b5cf6;
+  --brand-b: #6366f1;
+  --brand-c: #22d3ee;
+
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.12);
+  --danger: #ef4444;
+  --info: #60a5fa;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+
+  --shadow-1: 0 8px 25px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 20px 60px rgba(0, 0, 0, 0.3);
+
+  color-scheme: dark;
+}
+
+/* ========================================
+   RESET DEFENSIVO
+   Garante que o container raiz do Vite (html/body/#root) não
+   fique com max-width, padding ou text-align herdados do
+   boilerplate, o que costuma empurrar o layout para um lado
+   e quebrar a centralização em telas grandes.
+======================================== */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+#root {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
 
 /* ========================================
    PAGE
+   Fundo único, sólido, sem manchas nem grade — só uma cor,
+   igual em html/body/#root/.face-scanner, para não haver
+   nenhuma costura visível em nenhuma largura de tela.
 ======================================== */
 
+html,
+body,
+#root,
 .face-scanner {
-  width: 100%;
-  max-width: 1400px;
-
-  margin: 0 auto;
-
-  padding: 40px 24px 80px;
-
-  min-height: 100vh;
-
-  color: #ffffff;
-
-  font-family:
-    Inter,
-    Arial,
-    sans-serif;
+  background: var(--bg);
 }
 
+.face-scanner {
+  position: relative;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 40px 24px 96px;
+  min-height: 100vh;
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+}
+
+.face-scanner *,
+.face-scanner *::before,
+.face-scanner *::after {
+  box-sizing: border-box;
+}
+
+.face-scanner button {
+  font-family: inherit;
+}
+
+.face-scanner button:focus-visible {
+  outline: 2px solid var(--brand-a);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .face-scanner * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ========================================
+   CRÉDITO — Unifan × Finc
+   Gerado via CSS (::after), sem precisar tocar no JSX.
+======================================== */
+
+.face-scanner::after {
+  content: 'UNIFAN  ×  FINC   —   Inteligência Artificial aplicada ao reconhecimento facial';
+  display: block;
+  margin-top: 64px;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
 
 /* ========================================
    HEADER
 ======================================== */
 
 .scanner-header {
+  position: relative;
   display: flex;
-
   flex-direction: column;
-
   align-items: center;
-
   justify-content: center;
-
   text-align: center;
-
-  margin-bottom: 40px;
+  margin-bottom: 44px;
+  padding-top: 12px;
 }
 
+/* Brilho contido atrás da logo — um único glow, delimitado a um
+   círculo de tamanho fixo centralizado no header (não é um fundo
+   de página inteira), então nunca cria emenda/costura visível,
+   mesmo em telas ultralargas. */
+.scanner-header::before {
+  content: '';
+  position: absolute;
+  top: -60px;
+  left: 50%;
+  width: 420px;
+  height: 420px;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.16), rgba(34, 211, 238, 0.05) 55%, transparent 72%);
+  filter: blur(10px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.scanner-header > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Selo "IA" sobreposto à logo — reforça que a inteligência
+   artificial é o elemento central do produto (pedido do briefing
+   Unifan/Finc). Gerado via CSS, sem exigir mudança no JSX. */
+.scanner-logo {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 22px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, var(--brand-a), var(--brand-b));
+  box-shadow: 0 10px 40px rgba(139, 92, 246, 0.35);
+}
+
+.scanner-logo::after {
+  content: 'IA';
+  position: absolute;
+  bottom: -8px;
+  right: -8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--brand-c), #0ea5e9);
+  color: #04202a;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 2px solid var(--bg);
+  box-shadow: 0 4px 14px rgba(34, 211, 238, 0.45);
+  z-index: 2;
+}
+
+.scanner-logo svg,
+.scanner-logo img {
+  display: none;
+}
+
+.scanner-logo::before {
+  content: '';
+  width: 38px;
+  height: 38px;
+  z-index: 1;
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSI+CjxnIHN0cm9rZT0iI2ZmZmZmZiIgc3Ryb2tlLW9wYWNpdHk9IjAuNTUiIHN0cm9rZS13aWR0aD0iMS40IiBzdHJva2UtbGluZWNhcD0icm91bmQiPgo8bGluZSB4MT0iMzIiIHkxPSIxNSIgeDI9IjIzIiB5Mj0iMjUiLz4KPGxpbmUgeDE9IjMyIiB5MT0iMTUiIHgyPSI0MSIgeTI9IjI1Ii8+CjxsaW5lIHgxPSIyMyIgeTE9IjI1IiB4Mj0iMzIiIHkyPSIzMyIvPgo8bGluZSB4MT0iNDEiIHkxPSIyNSIgeDI9IjMyIiB5Mj0iMzMiLz4KPGxpbmUgeDE9IjIzIiB5MT0iMjUiIHgyPSIxOSIgeTI9IjM5Ii8+CjxsaW5lIHgxPSI0MSIgeTE9IjI1IiB4Mj0iNDUiIHkyPSIzOSIvPgo8bGluZSB4MT0iMzIiIHkxPSIzMyIgeDI9IjE5IiB5Mj0iMzkiLz4KPGxpbmUgeDE9IjMyIiB5MT0iMzMiIHgyPSI0NSIgeTI9IjM5Ii8+CjxsaW5lIHgxPSIxOSIgeTE9IjM5IiB4Mj0iMjQiIHkyPSI0OCIvPgo8bGluZSB4MT0iNDUiIHkxPSIzOSIgeDI9IjQwIiB5Mj0iNDgiLz4KPGxpbmUgeDE9IjI0IiB5MT0iNDgiIHgyPSIzMiIgeTI9IjUxIi8+CjxsaW5lIHgxPSI0MCIgeTE9IjQ4IiB4Mj0iMzIiIHkyPSI1MSIvPgo8bGluZSB4MT0iMTkiIHkxPSIzOSIgeDI9IjMyIiB5Mj0iNTEiLz4KPGxpbmUgeDE9IjQ1IiB5MT0iMzkiIHgyPSIzMiIgeTI9IjUxIi8+CjwvZz4KPGNpcmNsZSBjeD0iMzIiIGN5PSIxNSIgcj0iMi4xIiBmaWxsPSIjZmZmZmZmIi8+CjxjaXJjbGUgY3g9IjIzIiBjeT0iMjUiIHI9IjIuMSIgZmlsbD0iI2ZmZmZmZiIvPgo8Y2lyY2xlIGN4PSI0MSIgY3k9IjI1IiByPSIyLjEiIGZpbGw9IiNmZmZmZmYiLz4KPGNpcmNsZSBjeD0iMTkiIGN5PSIzOSIgcj0iMi4xIiBmaWxsPSIjZmZmZmZmIi8+CjxjaXJjbGUgY3g9IjQ1IiBjeT0iMzkiIHI9IjIuMSIgZmlsbD0iI2ZmZmZmZiIvPgo8Y2lyY2xlIGN4PSIyNCIgY3k9IjQ4IiByPSIyLjEiIGZpbGw9IiNmZmZmZmYiLz4KPGNpcmNsZSBjeD0iNDAiIGN5PSI0OCIgcj0iMi4xIiBmaWxsPSIjZmZmZmZmIi8+CjxjaXJjbGUgY3g9IjMyIiBjeT0iNTEiIHI9IjIuMyIgZmlsbD0iI2ZmZmZmZiIvPgo8Y2lyY2xlIGN4PSIzMiIgY3k9IjMzIiByPSIzLjEiIGZpbGw9IiNmYWNjMTUiLz4KPC9zdmc+");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+/* Pulso de "leitura ativa" — via box-shadow no próprio elemento,
+   sem precisar de um terceiro pseudo-elemento (::after já é usado
+   pelo selo "IA" acima). Único momento de movimento orquestrado,
+   não repetido nos demais componentes. */
+@keyframes logoGlowPulse {
+  0%, 100% {
+    box-shadow: 0 10px 40px rgba(139, 92, 246, 0.35), 0 0 0 0 rgba(139, 92, 246, 0.32);
+  }
+  50% {
+    box-shadow: 0 10px 40px rgba(139, 92, 246, 0.5), 0 0 0 9px rgba(139, 92, 246, 0);
+  }
+}
 
 .scanner-logo {
-  width: 70px;
-
-  height: 70px;
-
-  display: flex;
-
-  align-items: center;
-
-  justify-content: center;
-
-  margin-bottom: 20px;
-
-  border-radius: 20px;
-
-  background:
-    linear-gradient(
-      135deg,
-      #8b5cf6,
-      #6366f1
-    );
-
-  box-shadow:
-    0 10px 40px
-    rgba(139, 92, 246, 0.35);
+  animation: logoGlowPulse 2.8s ease-in-out infinite;
 }
-
 
 .scanner-header h1 {
   margin: 0;
-
-  font-size: 42px;
-
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 44px;
   font-weight: 700;
-
-  letter-spacing: -1px;
-
-  color: #ffffff;
+  letter-spacing: -0.02em;
+  background: linear-gradient(100deg, #ffffff 30%, var(--brand-c) 50%, #ffffff 70%);
+  background-size: 220% auto;
+  background-position: 0% center;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: titleSheen 6s ease-in-out infinite;
 }
 
+@keyframes titleSheen {
+  0%, 100% { background-position: 0% center; }
+  50% { background-position: 100% center; }
+}
 
 .scanner-header p {
   margin-top: 10px;
-
-  color: #9ca3af;
-
+  color: var(--text-muted);
   font-size: 17px;
+  max-width: 480px;
 }
-
 
 /* ========================================
    MODEL STATUS
@@ -101,35 +271,22 @@
 
 .model-status {
   display: flex;
-
   align-items: center;
-
   gap: 8px;
-
   margin-top: 20px;
-
-  padding:
-    10px 16px;
-
+  padding: 10px 16px;
   border-radius: 100px;
-
   font-size: 14px;
-
+  font-weight: 500;
   color: #d1d5db;
-
-  background:
-    rgba(255, 255, 255, 0.05);
-
-  border:
-    1px solid
-    rgba(255, 255, 255, 0.08);
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
-
 
 .model-status svg {
-  color: #4ade80;
+  color: var(--success);
+  flex-shrink: 0;
 }
-
 
 /* ========================================
    ERROR
@@ -137,59 +294,52 @@
 
 .scanner-error {
   display: flex;
-
   align-items: center;
-
   justify-content: center;
-
   gap: 10px;
-
   max-width: 800px;
-
-  margin:
-    0 auto 25px;
-
+  margin: 0 auto 25px;
   padding: 15px 20px;
-
   border-radius: 14px;
-
   color: #fecaca;
-
-  background:
-    rgba(239, 68, 68, 0.1);
-
-  border:
-    1px solid
-    rgba(239, 68, 68, 0.3);
+  font-size: 14.5px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
-
 
 /* ========================================
    MAIN SCANNER CARD
 ======================================== */
 
 .scanner-container {
+  position: relative;
   width: 100%;
-
   padding: 28px;
-
-  border-radius: 24px;
-
-  background:
-    rgba(255, 255, 255, 0.04);
-
-  border:
-    1px solid
-    rgba(255, 255, 255, 0.08);
-
-  box-shadow:
-    0 20px 60px
-    rgba(0, 0, 0, 0.3);
-
-  backdrop-filter:
-    blur(15px);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  isolation: isolate;
 }
 
+/* Borda em degradê — o card "principal" ganha um contorno sutil
+   violeta → ciano, reforçando que é aqui que a IA atua, sem recorrer
+   a nenhum efeito espalhado pela página inteira. */
+.scanner-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(34, 211, 238, 0.25), transparent 60%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: -1;
+}
 
 /* ========================================
    SCANNER TITLE
@@ -197,30 +347,23 @@
 
 .scanner-title {
   display: flex;
-
   align-items: center;
-
   gap: 12px;
-
   margin-bottom: 22px;
 }
 
-
 .scanner-title svg {
   color: #a78bfa;
+  flex-shrink: 0;
 }
-
 
 .scanner-title h2 {
   margin: 0;
-
-  font-size: 22px;
-
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 21px;
   font-weight: 600;
-
-  color: #ffffff;
+  color: var(--text);
 }
-
 
 /* ========================================
    CAMERA
@@ -228,108 +371,64 @@
 
 .camera-container {
   position: relative;
-
   width: 100%;
-
   min-height: 560px;
-
   aspect-ratio: 16 / 9;
-
   overflow: hidden;
-
-  border-radius: 20px;
-
+  border-radius: var(--radius-lg);
   background: #050505;
-
-  border:
-    1px solid
-    rgba(255, 255, 255, 0.1);
-
-  box-shadow:
-    inset 0 0 80px
-    rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.6);
 }
 
 .scanned-container {
   display: flex;
-
   align-items: center;
-
   justify-content: center;
-
-  background:
-    radial-gradient(
-      circle,
-      rgba(74, 222, 128, 0.15),
-      rgba(0, 0, 0, 0.8)
-    );
+  background: radial-gradient(circle, rgba(74, 222, 128, 0.15), rgba(0, 0, 0, 0.85));
 }
-
 
 .scanned-content {
   display: flex;
-
   flex-direction: column;
-
   align-items: center;
-
-  gap: 15px;
+  gap: 16px;
 }
-
 
 .scanned-icon {
-  width: 70px;
-
-  height: 70px;
-
+  width: 72px;
+  height: 72px;
   display: flex;
-
   align-items: center;
-
   justify-content: center;
-
   border-radius: 50%;
-
-  border: 2px solid #4ade80;
-
-  color: #4ade80;
-
+  border: 2px solid var(--success);
+  color: var(--success);
   font-size: 32px;
-
-  font-weight: bold;
+  font-weight: 700;
+  box-shadow: 0 0 0 8px rgba(74, 222, 128, 0.08);
 }
 
-
 .scanned-text {
-  color: #4ade80;
-
-  font-size: 22px;
-
-  font-weight: 700;
-
+  color: var(--success);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 600;
   letter-spacing: 4px;
 }
 
-
 /*
   VIDEO FICA ESCONDIDO.
-
-  O canvas é responsável por
-  mostrar o vídeo + landmarks.
+  O canvas é responsável por mostrar o vídeo + landmarks.
 */
 
 .hidden-video {
   position: absolute;
-
   width: 1px;
-
   height: 1px;
-
   opacity: 0;
-
   pointer-events: none;
 }
-
 
 /* ========================================
    CANVAS
@@ -337,18 +436,12 @@
 
 .camera-canvas {
   position: absolute;
-
   top: 0;
-
   left: 0;
-
   width: 100%;
-
   height: 100%;
-
   display: block;
 }
-
 
 /* ========================================
    CAMERA PLACEHOLDER
@@ -356,45 +449,26 @@
 
 .camera-placeholder {
   position: absolute;
-
   inset: 0;
-
   display: flex;
-
   flex-direction: column;
-
   align-items: center;
-
   justify-content: center;
-
   gap: 15px;
-
-  color: #6b7280;
-
-  background:
-    radial-gradient(
-      circle at center,
-      #111827,
-      #050505
-    );
-
+  color: var(--text-faint);
+  background: radial-gradient(circle at center, #111827, #050505);
   z-index: 2;
 }
 
-
 .camera-placeholder svg {
-  color: #8b5cf6;
-
-  opacity: 0.8;
+  color: var(--brand-a);
+  opacity: 0.85;
 }
-
 
 .camera-placeholder p {
   margin: 0;
-
-  font-size: 16px;
+  font-size: 15.5px;
 }
-
 
 /* ========================================
    FACE STATUS
@@ -402,43 +476,30 @@
 
 .face-status {
   display: flex;
-
   align-items: center;
-
   justify-content: center;
-
   gap: 10px;
-
   margin-top: 18px;
-
   padding: 14px;
-
   border-radius: 14px;
-
-  background:
-    rgba(255, 255, 255, 0.04);
-
-  border:
-    1px solid
-    rgba(255, 255, 255, 0.08);
-
+  background: var(--surface);
+  border: 1px solid var(--border);
   color: #d1d5db;
-}
-
-
-.face-status svg {
-  color: #4ade80;
-}
-
-
-.face-status strong {
-  margin-left: 5px;
-
-  color: #a7f3d0;
-
   font-size: 14px;
 }
 
+.face-status svg {
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.face-status strong {
+  margin-left: 5px;
+  color: #a7f3d0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13.5px;
+  font-weight: 600;
+}
 
 /* ========================================
    BUTTONS
@@ -446,145 +507,100 @@
 
 .scanner-buttons {
   display: flex;
-
   align-items: center;
-
   justify-content: center;
-
   flex-wrap: wrap;
-
   gap: 15px;
-
-  margin-top: 25px;
+  margin-top: 26px;
 }
-
 
 .scanner-button {
   display: flex;
-
   align-items: center;
-
   justify-content: center;
-
   gap: 10px;
-
   min-width: 170px;
-
-  padding:
-    14px 22px;
-
+  padding: 14px 22px;
   border: none;
-
   border-radius: 12px;
-
   font-size: 15px;
-
   font-weight: 600;
-
-  color: #ffffff;
-
+  color: var(--text);
   cursor: pointer;
-
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    opacity 0.2s ease;
-
-  font-family: inherit;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
 }
-
-
-/* HOVER */
 
 .scanner-button:hover:not(:disabled) {
-  transform:
-    translateY(-2px);
+  transform: translateY(-2px);
+  filter: brightness(1.05);
 }
 
-
-/* DISABLED */
+.scanner-button:active:not(:disabled) {
+  transform: translateY(0);
+}
 
 .scanner-button:disabled {
   opacity: 0.4;
-
   cursor: not-allowed;
 }
-
 
 /* ========================================
    START BUTTON
 ======================================== */
 
 .start-button {
-  background:
-    linear-gradient(
-      135deg,
-      #10b981,
-      #059669
-    );
-
-  box-shadow:
-    0 8px 25px
-    rgba(16, 185, 129, 0.25);
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 8px 25px rgba(16, 185, 129, 0.25);
 }
-
 
 .start-button:hover:not(:disabled) {
-  box-shadow:
-    0 12px 30px
-    rgba(16, 185, 129, 0.4);
+  box-shadow: 0 12px 30px rgba(16, 185, 129, 0.4);
 }
-
 
 /* ========================================
    SCAN BUTTON
 ======================================== */
 
+/* Botão de IA — é a ação central do produto ("gerar avatar via IA"),
+   então ganha um leve brilho deslizante contínuo para se destacar
+   dos demais botões, que ficam estáticos. */
 .scan-button {
-  background:
-    linear-gradient(
-      135deg,
-      #8b5cf6,
-      #6366f1
-    );
-
-  box-shadow:
-    0 8px 25px
-    rgba(139, 92, 246, 0.3);
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--brand-a), var(--brand-b));
+  box-shadow: 0 8px 25px rgba(139, 92, 246, 0.3);
 }
 
+.scan-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.25) 50%, transparent 70%);
+  background-size: 220% 100%;
+  animation: buttonSheen 3.4s ease-in-out infinite;
+}
+
+@keyframes buttonSheen {
+  0% { background-position: 120% 0; }
+  60%, 100% { background-position: -40% 0; }
+}
 
 .scan-button:hover:not(:disabled) {
-  box-shadow:
-    0 12px 35px
-    rgba(139, 92, 246, 0.5);
+  box-shadow: 0 12px 35px rgba(139, 92, 246, 0.5);
 }
-
 
 /* ========================================
    STOP BUTTON
 ======================================== */
 
 .stop-button {
-  background:
-    linear-gradient(
-      135deg,
-      #ef4444,
-      #dc2626
-    );
-
-  box-shadow:
-    0 8px 25px
-    rgba(239, 68, 68, 0.25);
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 8px 25px rgba(239, 68, 68, 0.25);
 }
-
 
 .stop-button:hover:not(:disabled) {
-  box-shadow:
-    0 12px 30px
-    rgba(239, 68, 68, 0.4);
+  box-shadow: 0 12px 30px rgba(239, 68, 68, 0.4);
 }
-
 
 /* ========================================
    SCAN RESULT
@@ -592,25 +608,13 @@
 
 .scan-result {
   width: 100%;
-
-  margin-top: 35px;
-
+  margin-top: 36px;
   padding: 30px;
-
-  border-radius: 24px;
-
-  background:
-    rgba(16, 185, 129, 0.05);
-
-  border:
-    1px solid
-    rgba(74, 222, 128, 0.25);
-
-  box-shadow:
-    0 20px 60px
-    rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-xl);
+  background: var(--success-soft);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  box-shadow: var(--shadow-2);
 }
-
 
 /* ========================================
    SCAN RESULT HEADER
@@ -618,32 +622,24 @@
 
 .scan-result-header {
   display: flex;
-
   align-items: center;
-
   justify-content: center;
-
   gap: 12px;
-
   margin-bottom: 28px;
 }
 
-
 .scan-result-header svg {
-  color: #4ade80;
+  color: var(--success);
+  flex-shrink: 0;
 }
-
 
 .scan-result-header h3 {
   margin: 0;
-
-  font-size: 24px;
-
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 23px;
   font-weight: 600;
-
-  color: #ffffff;
+  color: var(--text);
 }
-
 
 /* ========================================
    RESULT CONTENT
@@ -651,19 +647,12 @@
 
 .scan-result-content {
   display: grid;
-
-  grid-template-columns:
-    260px 1fr;
-
+  grid-template-columns: 260px 1fr;
   gap: 35px;
-
   align-items: center;
-
   max-width: 850px;
-
   margin: 0 auto;
 }
-
 
 /* ========================================
    CAPTURE IMAGE
@@ -671,35 +660,20 @@
 
 .scan-image-container {
   width: 260px;
-
   height: 260px;
-
   overflow: hidden;
-
-  border-radius: 20px;
-
+  border-radius: var(--radius-lg);
   background: #000;
-
-  border:
-    2px solid
-    rgba(74, 222, 128, 0.4);
-
-  box-shadow:
-    0 10px 40px
-    rgba(74, 222, 128, 0.12);
+  border: 2px solid rgba(74, 222, 128, 0.4);
+  box-shadow: 0 10px 40px rgba(74, 222, 128, 0.12);
 }
-
 
 .scan-image {
   width: 100%;
-
   height: 100%;
-
   display: block;
-
   object-fit: cover;
 }
-
 
 /* ========================================
    SCAN DATA
@@ -707,65 +681,48 @@
 
 .scan-data {
   display: flex;
-
   flex-direction: column;
-
-  gap: 16px;
+  gap: 14px;
 }
-
 
 .scan-data-item {
   display: flex;
-
   align-items: center;
-
   gap: 15px;
-
-  padding:
-    16px 18px;
-
+  padding: 16px 18px;
   border-radius: 14px;
-
-  background:
-    rgba(255, 255, 255, 0.04);
-
-  border:
-    1px solid
-    rgba(255, 255, 255, 0.07);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
+.scan-data-item:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: var(--surface-strong);
+}
 
 .scan-data-item svg {
-  color: #60a5fa;
-
+  color: var(--info);
   flex-shrink: 0;
 }
 
-
 .scan-data-item div {
   display: flex;
-
   flex-direction: column;
-
   gap: 4px;
 }
 
-
 .scan-data-item span {
-  color: #9ca3af;
-
+  color: var(--text-muted);
   font-size: 13px;
 }
 
-
 .scan-data-item strong {
-  color: #ffffff;
-
-  font-size: 17px;
-
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16.5px;
   font-weight: 600;
 }
-
 
 /* ========================================
    RESET BUTTON
@@ -773,222 +730,157 @@
 
 .reset-button {
   width: 100%;
-
   max-width: 850px;
-
-  margin:
-    30px auto 0;
-
-  background:
-    linear-gradient(
-      135deg,
-      #374151,
-      #4b5563
-    );
-
-  box-shadow:
-    0 8px 25px
-    rgba(0, 0, 0, 0.25);
+  margin: 30px auto 0;
+  background: linear-gradient(135deg, #374151, #4b5563);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.25);
 }
-
 
 .reset-button:hover:not(:disabled) {
-  background:
-    linear-gradient(
-      135deg,
-      #4b5563,
-      #6b7280
-    );
+  background: linear-gradient(135deg, #4b5563, #6b7280);
 }
-
 
 /* ========================================
    RESPONSIVE
 ======================================== */
 
 @media (max-width: 1024px) {
-
   .face-scanner {
-    padding:
-      30px 20px 60px;
+    padding: 30px 20px 60px;
   }
-
 
   .camera-container {
     min-height: 450px;
   }
 
-
   .scan-result-content {
-    grid-template-columns:
-      220px 1fr;
-
+    grid-template-columns: 220px 1fr;
     gap: 25px;
   }
 
-
   .scan-image-container {
     width: 220px;
-
     height: 220px;
   }
-
 }
-
 
 /* ========================================
    TABLET
 ======================================== */
 
 @media (max-width: 768px) {
-
   .face-scanner {
-    padding:
-      25px 15px 50px;
+    padding: 25px 15px 50px;
   }
-
 
   .scanner-header {
     margin-bottom: 30px;
   }
 
-
   .scanner-header h1 {
     font-size: 32px;
   }
 
-
   .scanner-container {
     padding: 18px;
-
     border-radius: 18px;
   }
 
-
   .camera-container {
     min-height: 400px;
-
     border-radius: 16px;
   }
 
-
   .scanner-buttons {
     flex-direction: column;
-
     width: 100%;
   }
-
 
   .scanner-button {
     width: 100%;
   }
 
-
   .scan-result {
     padding: 22px;
   }
 
-
   .scan-result-content {
     grid-template-columns: 1fr;
-
     text-align: center;
   }
 
-
   .scan-image-container {
     margin: 0 auto;
-
     width: 240px;
-
     height: 240px;
   }
-
 
   .scan-data-item {
     text-align: left;
   }
-
 }
-
 
 /* ========================================
    MOBILE
 ======================================== */
 
 @media (max-width: 480px) {
-
   .face-scanner {
-    padding:
-      20px 10px 40px;
+    padding: 20px 10px 40px;
   }
-
 
   .scanner-logo {
     width: 60px;
-
     height: 60px;
-
     border-radius: 16px;
   }
 
+  .scanner-logo::before {
+    width: 28px;
+    height: 28px;
+  }
 
   .scanner-header h1 {
     font-size: 27px;
   }
 
-
   .scanner-header p {
     font-size: 14px;
   }
-
 
   .scanner-container {
     padding: 14px;
   }
 
-
   .scanner-title h2 {
     font-size: 18px;
   }
 
-
   .camera-container {
     min-height: 320px;
-
     aspect-ratio: 4 / 3;
   }
 
-
   .face-status {
     flex-wrap: wrap;
-
     font-size: 13px;
   }
-
 
   .scan-result-header h3 {
     font-size: 20px;
   }
 
-
   .scan-image-container {
     width: 200px;
-
     height: 200px;
   }
-
 
   .scan-data-item {
     padding: 14px;
   }
 
-
   .scanner-button {
     min-width: 100%;
-
-    padding:
-      15px 20px;
+    padding: 15px 20px;
   }
-
 }
