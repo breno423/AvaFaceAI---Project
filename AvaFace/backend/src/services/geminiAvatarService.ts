@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Modality, MediaResolution } from '@google/genai';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -28,6 +28,11 @@ const client = new GoogleGenAI({
   apiKey
 });
 
+// Modelo em uso. gemini-2.5-flash-image será desligado em 02/10/2026,
+// por isso já aponta para o sucessor. Se o 3.1 não estiver disponível
+// na sua conta/região ainda, troque para 'gemini-2.5-flash-image'.
+const MODEL_NAME = 'gemini-nano-banana-2.1';
+
 export async function generateAvatarWithGemini(
   request: AvatarRequest
 ) {
@@ -40,115 +45,71 @@ export async function generateAvatarWithGemini(
   const { mimeType, base64 } =
     dataUrlToBase64(image);
 
+  // Prompt enxuto de propósito: dados numéricos crus (ex.: faceRatio)
+  // atrapalham mais do que ajudam, e listas longas de "DO NOT" tendem
+  // a produzir texturas de pele exageradas/estranhas neste modelo.
   const prompt = `
-Use the provided photograph as the PRIMARY visual reference.
+Transform this photograph into a clean, polished ${style} avatar
+render (CGI character style) — smooth stylized shading, not a
+literal photograph, but clearly the same person.
 
-Transform the person in the reference photograph
-into a personalized ${style} avatar.
+Keep this person's real skin tone, hair color/style, eye color,
+face shape, and any glasses or facial hair exactly as in the photo.
+Do not add extra skin texture, blemishes, or wrinkles that are not
+visible in the reference photo — keep the render clean and smooth.
 
-IDENTITY PRESERVATION IS THE HIGHEST PRIORITY.
-
-The final avatar must represent the SAME PERSON
-shown in the reference image.
-
-Preserve as accurately as possible:
-
-- skin tone
-- skin appearance
-- hair color
-- hair texture
-- hairstyle
-- hair length
-- eye color
-- eyebrow shape
-- facial hair
-- glasses
-- visible accessories
-- face shape
-- facial proportions
-- relative position of the eyes
-- recognizable facial characteristics
-
-DO NOT:
-
-- change the person's skin tone
-- change the person's hair color
-- replace the hairstyle
-- invent a different face
-- significantly alter facial proportions
-- make the person look like another individual
-- apply excessive beautification
-- change the person's apparent age unnecessarily
-
-The objective is NOT to create a generic avatar.
-
-The objective is to create a stylized 3D avatar
-that is clearly recognizable as the SAME PERSON
-from the reference photograph.
-
-Facial geometry extracted with MediaPipe:
-
-Face shape: ${face.faceShape}
-Face width: ${face.faceWidth}
-Face height: ${face.faceHeight}
-Face ratio: ${face.faceRatio}
-Eye distance: ${face.eyeDistance}
-
-Use these measurements as additional structural guidance,
-but prioritize the actual reference photograph.
-
-Generate a clean, polished 3D avatar.
-Use a neutral background.
-Keep the person's main visual identity intact.
+Face shape reference: ${face.faceShape}.
+Neutral, simple background.
 `;
 
   console.log(
     'Enviando imagem para Gemini...'
   );
 
-  const interaction =
-    await client.interactions.create({
-      model: 'gemini-2.5-flash-image',
+  const response = await client.models.generateContent({
+    model: MODEL_NAME,
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType,
+              data: base64
+            }
+          }
+        ]
+      }
+    ],
+    config: {
+      responseModalities: [Modality.TEXT, Modality.IMAGE],
+      // Lê a foto de referência em alta resolução (menos "imperfeições
+      // inventadas" por causa de detalhe perdido na entrada).
+      mediaResolution: MediaResolution.MEDIA_RESOLUTION_HIGH,
+      // Gera a saída em 2K em vez do 1K padrão (mais nítido).
+      imageConfig: {
+        aspectRatio: '1:1',
+        imageSize: '2K'
+      }
+    }
+  });
 
-      input: [
-        {
-          type: 'text',
-          text: prompt
-        },
-        {
-          type: 'image',
-          mime_type: mimeType,
-          data: base64
-        }
-      ],
+  const parts = response.candidates?.[0]?.content?.parts ?? [];
+  const imagePart = parts.find(
+    (part) => part.inlineData?.data
+  );
 
-        response_format: {
-            type: 'image',
-            mime_type: 'image/jpeg',
-            aspect_ratio: '1:1',
-            image_size: '1K'
-}
-    });
-
-  if (!interaction.output_image) {
+  if (!imagePart?.inlineData?.data) {
     throw new Error(
       'Gemini não retornou uma imagem.'
     );
   }
 
-    if (
-        !interaction.output_image ||
-        !interaction.output_image.data
-    ) {
-        throw new Error(
-            'Gemini não retornou uma imagem.'
-        );
-    }
-
-    const buffer = Buffer.from(
-        interaction.output_image.data,
-        'base64'
-    );
+  const buffer = Buffer.from(
+    imagePart.inlineData.data,
+    'base64'
+  );
 
   const generatedDir = path.resolve(
     process.cwd(),
@@ -163,7 +124,7 @@ Keep the person's main visual identity intact.
   );
 
   const fileName =
-  `gemini-avatar-${Date.now()}.jpg`;
+    `gemini-avatar-${Date.now()}.jpg`;
 
   const filePath =
     path.join(
@@ -181,14 +142,14 @@ Keep the person's main visual identity intact.
   );
 
   const generatedImage =
-  `data:image/jpeg;base64,${buffer.toString(
-    'base64'
-  )}`;
-  
+    `data:image/jpeg;base64,${buffer.toString(
+      'base64'
+    )}`;
+
   return {
     success: true,
     provider: 'gemini',
-    model: 'gemini-3.1-flash-image',
+    model: MODEL_NAME,
     image: generatedImage
   };
 }

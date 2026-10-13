@@ -991,7 +991,7 @@ const FaceRecognition: React.FC = () => {
 
         try {
           const response = await fetch(
-            'http://localhost:3000/api/avatar/generate',
+            'http://localhost:3000/api/avatar/generate-gemini',
             {
               method: 'POST',
               headers: {

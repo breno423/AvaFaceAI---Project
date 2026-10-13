@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.23.0",
+    "@gradio/client": "^2.7.0",
     "@huggingface/inference": "^4.13.30",
     "cors": "^2.8.5",
     "dotenv": "^18.0.0",

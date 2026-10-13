@@ -29,106 +29,70 @@ export async function generateAvatar(
     style
   } = request;
 
+  // IMPORTANTE: FLUX.1-Kontext-dev é um modelo de edição CONSERVADORA.
+  // Com guidance_scale baixo (padrão 3.5) e um prompt cheio de
+  // instruções de "preservar", ele tende a devolver quase a mesma foto.
+  // A instrução de transformação vai PRIMEIRO e é reforçada, e a lista
+  // de preservação fica mais enxuta para não dominar o prompt.
   const prompt = `
-Edit the provided photograph into a personalized
-${style} 3D avatar.
+Transform this photograph into a stylized ${style} rendered avatar,
+similar to a CGI character render or Pixar-style 3D model.
 
-IMPORTANT:
-The person in the reference image must remain
-the SAME PERSON.
+The output must clearly look like a 3D RENDER, not a photograph:
+smooth stylized shading, slightly simplified features, a clean
+3D-render look to skin and hair.
 
-The reference photograph is the PRIMARY source
-of information about the person's appearance.
-
-Preserve the person's identity and visual
-characteristics as accurately as possible.
-
-PRESERVE EXACTLY:
-
+At the same time, this must remain recognizable as the SAME PERSON
+in the reference photo. Keep this person's:
 - skin tone
-- skin appearance
-- hair color
-- hair texture
-- hairstyle
-- hair length
+- hair color and hairstyle
 - eye color
-- eyebrow shape
-- facial hair
-- glasses
-- visible accessories
-- face shape
-- facial proportions
-- eye position
-- nose shape
-- mouth shape
-- jaw shape
-- overall facial structure
+- face shape and proportions
+- glasses/facial hair, if present
 
-DO NOT:
+Do not turn this into a different person, and do not keep it looking
+like an untouched photograph — it must be visibly transformed into a
+3D avatar render.
 
-- change the person's skin tone
-- change the hair color
-- change the hairstyle
-- replace the person's face
-- create a generic person
-- invent different facial characteristics
-- significantly change facial proportions
-- excessively beautify the face
-- change the apparent age unnecessarily
+Reference facial geometry (MediaPipe):
+Face shape: ${face.faceShape}, ratio: ${face.faceRatio}
 
-Only transform the visual representation
-into a polished 3D avatar.
-
-The result must clearly look like the
-same person from the reference photograph.
-
-FACIAL GEOMETRY FROM MEDIAPIPE:
-
-Face shape: ${face.faceShape}
-Face width: ${face.faceWidth}
-Face height: ${face.faceHeight}
-Face ratio: ${face.faceRatio}
-Eye distance: ${face.eyeDistance}
-
-Use these measurements as additional structural
-guidance.
-
-However, the actual reference photograph
-has priority over the numerical measurements.
-
-Create a clean polished 3D avatar.
-
-Use a simple neutral background.
+Neutral, simple background.
 `;
 
   console.log(
-  'Enviando imagem para FLUX.1-Kontext...'
-);
+    'Enviando imagem para FLUX.1-Kontext...'
+  );
 
-const imageBlob = dataUrlToBlob(image);
+  const imageBlob = dataUrlToBlob(image);
 
-console.log(
-  'Imagem convertida para Blob:',
-  {
-    type: imageBlob.type,
-    size: imageBlob.size
-  }
-);
-
-const imageResponse =
-  await client.imageToImage({
-    model:
-      'black-forest-labs/FLUX.1-Kontext-dev',
-
-    inputs: imageBlob,
-
-    parameters: {
-      prompt
+  console.log(
+    'Imagem convertida para Blob:',
+    {
+      type: imageBlob.type,
+      size: imageBlob.size
     }
-  });
-const buffer = Buffer.from(
-  await imageResponse.arrayBuffer()
-);
+  );
+
+  const imageResponse =
+    await client.imageToImage({
+      model:
+        'black-forest-labs/FLUX.1-Kontext-dev',
+
+      inputs: imageBlob,
+
+      parameters: {
+        prompt,
+        // Sobe a aderência ao prompt (padrão é 3.5).
+        // Valores maiores = mais transformação, menos "cópia" da foto.
+        // Teste também 6.0 e 8.0 para comparar nos seus resultados.
+        guidance_scale: 5.5
+      }
+    });
+
+  const buffer = Buffer.from(
+    await imageResponse.arrayBuffer()
+  );
 
   const generatedDir =
     path.resolve(
