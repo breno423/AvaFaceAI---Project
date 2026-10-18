@@ -18,7 +18,7 @@ app.use(cors());
 
 app.use(
   express.json({
-    limit: '10mb'
+    limit: '30mb'
   })
 );
 
@@ -102,6 +102,7 @@ app.post(
 
     const {
       image,
+      images,
       face,
       style
     } = req.body;
@@ -112,6 +113,9 @@ app.post(
 
     console.log({
       imageReceived: !!image,
+      imagesReceived: images
+        ? Object.keys(images)
+        : [],
       face,
       style
     });
@@ -128,6 +132,7 @@ app.post(
       const avatar =
         await generateAvatarWithGemini({
           image,
+          images,
           face,
           style
         });

@@ -33,7 +33,63 @@ import {
 } from '../services/FaceAnalyzer.ts';
 
 import './FaceRecognition.css';
-import type { AvatarRequest } from '../types/Avatar.ts';
+import type {
+  AvatarRequest,
+  AvatarImages
+} from '../types/Avatar.ts';
+
+
+/*
+  CONFIGURAÇÕES
+*/
+
+const AVATAR_API_URL =
+  'http://localhost:3000/api/avatar/generate-gemini';
+
+/*
+  Quantos frames seguidos a pose precisa
+  ficar correta antes de tirar a foto
+  (~12 frames = meio segundo).
+*/
+const HOLD_FRAMES = 12;
+
+/*
+  Posição do nariz entre as bordas do rosto,
+  onde 0 = centro exato.
+
+  - Frente: precisa ficar próximo de 0.
+  - Lados: precisa estar entre MIN e MAX.
+
+  Se achar difícil ou fácil demais,
+  ajuste estes valores.
+*/
+const FRONT_MAX_OFFSET = 0.07;
+const SIDE_MIN_OFFSET = 0.16;
+const SIDE_MAX_OFFSET = 0.4;
+
+const STEP_COOLDOWN_MS = 900;
+
+const JPEG_QUALITY = 0.92;
+
+const DEBUG_POSE = false;
+
+const SCAN_STEPS = [
+  {
+    title: 'Frente',
+    instruction:
+      'Olhe diretamente para a câmera e mantenha o rosto reto.'
+  },
+  {
+    title: 'Primeiro lado',
+    instruction:
+      'Vire a cabeça devagar para um dos lados (esquerda ou direita) e segure.'
+  },
+  {
+    title: 'Lado oposto',
+    instruction:
+      'Agora vire a cabeça para o lado oposto e segure.'
+  }
+];
 
 
 interface FaceScan {
@@ -41,6 +97,8 @@ interface FaceScan {
   landmarks: FaceLandmark[];
 
   image: string;
+
+  images: AvatarImages;
 
   timestamp: string;
 
@@ -77,46 +135,33 @@ function getContainRect(
 
   }
 
-
   const sourceRatio =
     sourceWidth / sourceHeight;
 
   const destRatio =
     destWidth / destHeight;
 
-
   let width: number;
 
   let height: number;
-
 
   if (sourceRatio > destRatio) {
 
     width = destWidth;
 
-    height =
-      destWidth / sourceRatio;
+    height = destWidth / sourceRatio;
 
   } else {
 
     height = destHeight;
 
-    width =
-      destHeight * sourceRatio;
+    width = destHeight * sourceRatio;
 
   }
 
-
-  const x =
-    (destWidth - width) / 2;
-
-  const y =
-    (destHeight - height) / 2;
-
-
   return {
-    x,
-    y,
+    x: (destWidth - width) / 2,
+    y: (destHeight - height) / 2,
     width,
     height
   };
@@ -134,9 +179,7 @@ function renderLandmarks(
   landmarks: FaceLandmark[]
 ): void {
 
-  const canvas =
-    ctx.canvas;
-
+  const canvas = ctx.canvas;
 
   ctx.clearRect(
     0,
@@ -145,36 +188,21 @@ function renderLandmarks(
     canvas.height
   );
 
-
-  const videoWidth =
-    video.videoWidth;
-
-  const videoHeight =
-    video.videoHeight;
-
-
   if (
-    !videoWidth ||
-    !videoHeight
+    !video.videoWidth ||
+    !video.videoHeight
   ) {
 
     return;
 
   }
 
-
-  const rect =
-    getContainRect(
-      videoWidth,
-      videoHeight,
-      canvas.width,
-      canvas.height
-    );
-
-
-  /*
-    Desenha o vídeo
-  */
+  const rect = getContainRect(
+    video.videoWidth,
+    video.videoHeight,
+    canvas.width,
+    canvas.height
+  );
 
   ctx.drawImage(
     video,
@@ -184,46 +212,67 @@ function renderLandmarks(
     rect.height
   );
 
+  landmarks.forEach((landmark) => {
 
-  /*
-    Desenha os landmarks
-  */
+    const x =
+      landmark.x * rect.width + rect.x;
 
-  landmarks.forEach(
-    (landmark) => {
+    const y =
+      landmark.y * rect.height + rect.y;
 
-      const x =
-        landmark.x *
-        rect.width +
-        rect.x;
+    ctx.beginPath();
 
+    ctx.arc(x, y, 2, 0, Math.PI * 2);
 
-      const y =
-        landmark.y *
-        rect.height +
-        rect.y;
+    ctx.fillStyle = '#00ff88';
 
+    ctx.fill();
 
-      ctx.beginPath();
+  });
+
+}
 
 
-      ctx.arc(
-        x,
-        y,
-        2,
-        0,
-        Math.PI * 2
-      );
+/*
+  Estima o quanto a cabeça está virada.
 
+  Compara a posição horizontal do nariz
+  com as duas bordas do rosto:
 
-      ctx.fillStyle =
-        '#00ff88';
+  - perto de 0  -> de frente
+  - positivo    -> nariz para a direita da imagem
+  - negativo    -> nariz para a esquerda da imagem
+*/
 
+function getHeadYawOffset(
+  landmarks: FaceLandmark[]
+): number | null {
 
-      ctx.fill();
+  const nose = landmarks[1];
 
-    }
-  );
+  const edgeA = landmarks[234];
+
+  const edgeB = landmarks[454];
+
+  if (!nose || !edgeA || !edgeB) {
+
+    return null;
+
+  }
+
+  const leftX = Math.min(edgeA.x, edgeB.x);
+
+  const rightX = Math.max(edgeA.x, edgeB.x);
+
+  const width = rightX - leftX;
+
+  if (width < 0.02) {
+
+    return null;
+
+  }
+
+  return (nose.x - leftX) / width - 0.5;
 
 }
 
@@ -236,43 +285,59 @@ const FaceRecognition: React.FC = () => {
   */
 
   const videoRef =
-    useRef<HTMLVideoElement | null>(
-      null
-    );
-
+    useRef<HTMLVideoElement | null>(null);
 
   const canvasRef =
-    useRef<HTMLCanvasElement | null>(
-      null
-    );
-
+    useRef<HTMLCanvasElement | null>(null);
 
   const faceLandmarkerRef =
-    useRef<FaceLandmarker | null>(
-      null
-    );
-
+    useRef<FaceLandmarker | null>(null);
 
   const animationFrameRef =
-    useRef<number | null>(
-      null
-    );
-
-
-  /*
-    Ref separada para manter
-    sempre os últimos landmarks.
-  */
+    useRef<number | null>(null);
 
   const faceLandmarksRef =
-    useRef<FaceLandmark[]>(
-      []
-    );
-
+    useRef<FaceLandmark[]>([]);
 
   const lastVideoTimeRef =
-    useRef<number>(
-      -1
+    useRef<number>(-1);
+
+  /*
+    Refs da captura guiada.
+    Ficam em ref (e não em state) porque
+    são lidas dentro do loop de vídeo.
+  */
+
+  const scanActiveRef =
+    useRef(false);
+
+  const stepIndexRef =
+    useRef(0);
+
+  const holdFramesRef =
+    useRef(0);
+
+  const cooldownUntilRef =
+    useRef(0);
+
+  const firstSideSignRef =
+    useRef(0);
+
+  const capturedRef =
+    useRef<Partial<AvatarImages>>({});
+
+  const frontLandmarksRef =
+    useRef<FaceLandmark[]>([]);
+
+  const guidanceRef =
+    useRef('');
+
+  const debugCounterRef =
+    useRef(0);
+
+  const evaluateScanRef =
+    useRef<(landmarks: FaceLandmark[]) => void>(
+      () => {}
     );
 
 
@@ -280,56 +345,37 @@ const FaceRecognition: React.FC = () => {
     STATES
   */
 
-  const [
-    isLoading,
-    setIsLoading
-  ] =
+  const [isLoading, setIsLoading] =
     useState(false);
 
-
-  const [
-    isModelLoaded,
-    setIsModelLoaded
-  ] =
+  const [isModelLoaded, setIsModelLoaded] =
     useState(false);
 
-
-  const [
-    isStreaming,
-    setIsStreaming
-  ] =
+  const [isStreaming, setIsStreaming] =
     useState(false);
 
+  const [faceLandmarks, setFaceLandmarks] =
+    useState<FaceLandmark[]>([]);
 
-  const [
-    faceLandmarks,
-    setFaceLandmarks
-  ] =
-    useState<FaceLandmark[]>(
-      []
-    );
+  const [faceScan, setFaceScan] =
+    useState<FaceScan | null>(null);
 
-
-  const [
-    faceScan,
-    setFaceScan
-  ] =
-    useState<FaceScan | null>(
-      null
-    );
-
-
-  const [
-    isScanning,
-    setIsScanning
-  ] =
+  const [isScanning, setIsScanning] =
     useState(false);
 
+  const [isGenerating, setIsGenerating] =
+    useState(false);
 
-  const [
-    error,
-    setError
-  ] =
+  const [stepIndex, setStepIndex] =
+    useState(-1);
+
+  const [holdFrames, setHoldFrames] =
+    useState(0);
+
+  const [guidance, setGuidance] =
+    useState('');
+
+  const [error, setError] =
     useState('');
 
 
@@ -346,12 +392,10 @@ const FaceRecognition: React.FC = () => {
 
         setError('');
 
-
         const vision =
           await FilesetResolver.forVisionTasks(
             'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
           );
-
 
         faceLandmarkerRef.current =
           await FaceLandmarker.createFromOptions(
@@ -363,42 +407,28 @@ const FaceRecognition: React.FC = () => {
                 modelAssetPath:
                   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task',
 
-                delegate:
-                  'GPU'
+                delegate: 'GPU'
 
               },
 
+              runningMode: 'VIDEO',
 
-              runningMode:
-                'VIDEO',
+              numFaces: 1,
 
+              minFaceDetectionConfidence: 0.5,
 
-              numFaces:
-                1,
+              minFacePresenceConfidence: 0.5,
 
-
-              minFaceDetectionConfidence:
-                0.5,
-
-
-              minFacePresenceConfidence:
-                0.5,
-
-
-              minTrackingConfidence:
-                0.5
+              minTrackingConfidence: 0.5
 
             }
           );
 
-
         setIsModelLoaded(true);
-
 
         console.log(
           'Face Landmarker initialized successfully'
         );
-
 
       } catch (err) {
 
@@ -407,11 +437,9 @@ const FaceRecognition: React.FC = () => {
           err
         );
 
-
         setError(
           'Não foi possível carregar o modelo de IA.'
         );
-
 
       } finally {
 
@@ -423,24 +451,425 @@ const FaceRecognition: React.FC = () => {
 
 
   /*
+    CAPTURA O FRAME ATUAL DO VÍDEO
+    (JPEG para manter as 3 imagens leves)
+  */
+
+  const captureFrame =
+    (): string | null => {
+
+      const video = videoRef.current;
+
+      if (
+        !video ||
+        !video.videoWidth ||
+        !video.videoHeight
+      ) {
+
+        return null;
+
+      }
+
+      const captureCanvas =
+        document.createElement('canvas');
+
+      captureCanvas.width =
+        video.videoWidth;
+
+      captureCanvas.height =
+        video.videoHeight;
+
+      const context =
+        captureCanvas.getContext('2d');
+
+      if (!context) {
+
+        return null;
+
+      }
+
+      context.drawImage(
+        video,
+        0,
+        0,
+        captureCanvas.width,
+        captureCanvas.height
+      );
+
+      return captureCanvas.toDataURL(
+        'image/jpeg',
+        JPEG_QUALITY
+      );
+
+    };
+
+
+  /*
+    ATUALIZA A MENSAGEM DE ORIENTAÇÃO
+    (só mexe no state se o texto mudou)
+  */
+
+  const updateGuidance =
+    (message: string): void => {
+
+      if (guidanceRef.current !== message) {
+
+        guidanceRef.current = message;
+
+        setGuidance(message);
+
+      }
+
+    };
+
+
+  /*
+    FINALIZA O SCAN:
+    envia as 3 imagens ao backend
+  */
+
+  const finishScan =
+    async (): Promise<void> => {
+
+      scanActiveRef.current = false;
+
+      setIsScanning(false);
+
+      setStepIndex(-1);
+
+      setHoldFrames(0);
+
+      const {
+        front,
+        left,
+        right
+      } = capturedRef.current;
+
+      if (
+        !front ||
+        !left ||
+        !right ||
+        frontLandmarksRef.current.length === 0
+      ) {
+
+        setError(
+          'Não foi possível capturar as três imagens. Tente novamente.'
+        );
+
+        return;
+
+      }
+
+      setIsGenerating(true);
+
+      try {
+
+        const landmarks = [
+          ...frontLandmarksRef.current
+        ];
+
+        /*
+          A análise facial usa só a foto frontal,
+          que é onde as medidas são confiáveis.
+        */
+
+        const analysis =
+          analyzeFace(landmarks);
+
+        const images: AvatarImages = {
+          front,
+          left,
+          right
+        };
+
+        const avatarRequest: AvatarRequest = {
+
+          image: front,
+
+          images,
+
+          face: {
+            faceWidth: analysis.faceWidth,
+            faceHeight: analysis.faceHeight,
+            faceRatio: analysis.faceRatio,
+            faceShape: analysis.faceShape,
+            eyeDistance: analysis.eyeDistance
+          },
+
+          style: '3D'
+
+        };
+
+        const response = await fetch(
+          AVATAR_API_URL,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(avatarRequest)
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+
+          throw new Error(
+            data.message ??
+            'Erro ao gerar o avatar.'
+          );
+
+        }
+
+        console.log(
+          'Resposta do Backend:',
+          data
+        );
+
+        setFaceScan({
+
+          landmarks,
+
+          image: front,
+
+          images,
+
+          timestamp:
+            new Date().toISOString(),
+
+          analysis
+
+        });
+
+      } catch (err) {
+
+        console.error(
+          'Erro ao gerar avatar:',
+          err
+        );
+
+        setError(
+          'Não foi possível gerar o avatar. Tente escanear novamente.'
+        );
+
+      } finally {
+
+        setIsGenerating(false);
+
+      }
+
+    };
+
+
+  /*
+    AVALIA A POSE ATUAL
+    (chamada a cada frame novo do vídeo
+    enquanto o scan guiado está ativo)
+  */
+
+  const evaluateScan =
+    (landmarks: FaceLandmark[]): void => {
+
+      if (!scanActiveRef.current) {
+
+        return;
+
+      }
+
+      if (
+        performance.now() <
+        cooldownUntilRef.current
+      ) {
+
+        return;
+
+      }
+
+      const step =
+        stepIndexRef.current;
+
+      const offset =
+        getHeadYawOffset(landmarks);
+
+      let valid = false;
+
+      let message = '';
+
+      if (offset === null) {
+
+        message =
+          'Rosto não detectado. Mantenha o rosto visível.';
+
+      } else {
+
+        const abs = Math.abs(offset);
+
+        const sign =
+          offset > 0 ? 1 : -1;
+
+        if (step === 0) {
+
+          valid =
+            abs <= FRONT_MAX_OFFSET;
+
+          message = valid
+            ? 'Perfeito, mantenha a posição...'
+            : 'Olhe reto para a câmera.';
+
+        } else if (
+          step === 2 &&
+          sign === firstSideSignRef.current
+        ) {
+
+          message =
+            'Vire para o lado OPOSTO ao anterior.';
+
+        } else if (abs < SIDE_MIN_OFFSET) {
+
+          message =
+            'Vire um pouco mais a cabeça.';
+
+        } else if (abs > SIDE_MAX_OFFSET) {
+
+          message =
+            'Vire um pouco menos, mantenha o rosto visível.';
+
+        } else {
+
+          valid = true;
+
+          message =
+            'Perfeito, mantenha a posição...';
+
+        }
+
+      }
+
+      if (DEBUG_POSE && offset !== null) {
+
+        debugCounterRef.current += 1;
+
+        if (debugCounterRef.current % 10 === 0) {
+
+          console.log(
+            'Yaw offset:',
+            offset.toFixed(3)
+          );
+
+        }
+
+      }
+
+      holdFramesRef.current = valid
+        ? holdFramesRef.current + 1
+        : 0;
+
+      setHoldFrames(holdFramesRef.current);
+
+      updateGuidance(message);
+
+      if (holdFramesRef.current < HOLD_FRAMES) {
+
+        return;
+
+      }
+
+      /*
+        Pose mantida: captura a foto.
+      */
+
+      const image = captureFrame();
+
+      if (!image || offset === null) {
+
+        holdFramesRef.current = 0;
+
+        return;
+
+      }
+
+      if (step === 0) {
+
+        capturedRef.current.front = image;
+
+        frontLandmarksRef.current =
+          [...landmarks];
+
+      } else {
+
+        /*
+          Nariz para a direita da imagem
+          = rosto virado para a esquerda
+          da pessoa (câmera não espelhada).
+        */
+
+        const sign =
+          offset > 0 ? 1 : -1;
+
+        if (step === 1) {
+
+          firstSideSignRef.current = sign;
+
+        }
+
+        if (sign > 0) {
+
+          capturedRef.current.left = image;
+
+        } else {
+
+          capturedRef.current.right = image;
+
+        }
+
+      }
+
+      holdFramesRef.current = 0;
+
+      setHoldFrames(0);
+
+      cooldownUntilRef.current =
+        performance.now() +
+        STEP_COOLDOWN_MS;
+
+      if (step < SCAN_STEPS.length - 1) {
+
+        stepIndexRef.current = step + 1;
+
+        setStepIndex(step + 1);
+
+        updateGuidance(
+          'Foto capturada! Prepare a próxima pose.'
+        );
+
+      } else {
+
+        void finishScan();
+
+      }
+
+    };
+
+  evaluateScanRef.current =
+    evaluateScan;
+
+
+  /*
     DETECÇÃO DOS LANDMARKS
   */
 
   const detectFaceLandmarks =
     useCallback((): void => {
 
-
       const video =
         videoRef.current;
-
 
       const canvas =
         canvasRef.current;
 
-
       const landmarker =
         faceLandmarkerRef.current;
-
 
       if (
         !video ||
@@ -453,11 +882,9 @@ const FaceRecognition: React.FC = () => {
             detectFaceLandmarks
           );
 
-
         return;
 
       }
-
 
       /*
         Ajusta o tamanho real
@@ -467,32 +894,23 @@ const FaceRecognition: React.FC = () => {
       const displayWidth =
         canvas.clientWidth;
 
-
       const displayHeight =
         canvas.clientHeight;
-
 
       if (
         displayWidth &&
         displayHeight &&
         (
-          canvas.width !==
-            displayWidth ||
-
-          canvas.height !==
-            displayHeight
+          canvas.width !== displayWidth ||
+          canvas.height !== displayHeight
         )
       ) {
 
-        canvas.width =
-          displayWidth;
+        canvas.width = displayWidth;
 
-
-        canvas.height =
-          displayHeight;
+        canvas.height = displayHeight;
 
       }
-
 
       /*
         Detecta novo frame
@@ -501,9 +919,7 @@ const FaceRecognition: React.FC = () => {
       if (
         video.currentTime !==
           lastVideoTimeRef.current &&
-
         !video.paused &&
-
         !video.ended
       ) {
 
@@ -515,7 +931,6 @@ const FaceRecognition: React.FC = () => {
               performance.now()
             );
 
-
           if (
             results.faceLandmarks &&
             results.faceLandmarks.length > 0
@@ -523,45 +938,30 @@ const FaceRecognition: React.FC = () => {
 
             const landmarks =
               results.faceLandmarks[0]
-                .map(
-                  (landmark) => ({
-                    x: landmark.x,
-                    y: landmark.y,
-                    z: landmark.z
-                  })
-                );
+                .map((landmark) => ({
+                  x: landmark.x,
+                  y: landmark.y,
+                  z: landmark.z
+                }));
 
-
-            /*
-              Atualiza o State
-            */
-
-            setFaceLandmarks(
-              landmarks
-            );
-
-
-            /*
-              Atualiza a Ref
-              imediatamente.
-            */
+            setFaceLandmarks(landmarks);
 
             faceLandmarksRef.current =
               landmarks;
 
+            evaluateScanRef.current(
+              landmarks
+            );
 
           } else {
 
-            setFaceLandmarks(
-              []
-            );
+            setFaceLandmarks([]);
 
+            faceLandmarksRef.current = [];
 
-            faceLandmarksRef.current =
-              [];
+            evaluateScanRef.current([]);
 
           }
-
 
         } catch (err) {
 
@@ -572,12 +972,10 @@ const FaceRecognition: React.FC = () => {
 
         }
 
-
         lastVideoTimeRef.current =
           video.currentTime;
 
       }
-
 
       /*
         Renderiza o frame
@@ -585,7 +983,6 @@ const FaceRecognition: React.FC = () => {
 
       const ctx =
         canvas.getContext('2d');
-
 
       if (ctx) {
 
@@ -597,16 +994,10 @@ const FaceRecognition: React.FC = () => {
 
       }
 
-
-      /*
-        Próximo frame
-      */
-
       animationFrameRef.current =
         requestAnimationFrame(
           detectFaceLandmarks
         );
-
 
     }, []);
 
@@ -624,19 +1015,13 @@ const FaceRecognition: React.FC = () => {
 
         setError('');
 
-
-        if (
-          !videoRef.current
-        ) {
+        if (!videoRef.current) {
 
           return;
 
         }
 
-
-        if (
-          !isModelLoaded
-        ) {
+        if (!isModelLoaded) {
 
           setError(
             'O modelo ainda está carregando.'
@@ -646,7 +1031,6 @@ const FaceRecognition: React.FC = () => {
 
         }
 
-
         const stream =
           await navigator
             .mediaDevices
@@ -654,55 +1038,37 @@ const FaceRecognition: React.FC = () => {
 
               video: {
 
-                width:
-                  {
-                    ideal: 1280
-                  },
+                width: { ideal: 1280 },
 
-                height:
-                  {
-                    ideal: 720
-                  },
+                height: { ideal: 720 },
 
-                facingMode:
-                  'user'
+                facingMode: 'user'
 
               }
 
             });
 
-
         videoRef.current.srcObject =
           stream;
-
 
         videoRef.current.onloadedmetadata =
           async (): Promise<void> => {
 
-
-            if (
-              !videoRef.current
-            ) {
+            if (!videoRef.current) {
 
               return;
 
             }
 
-
             await videoRef.current.play();
-
 
             setIsStreaming(true);
 
-
-            lastVideoTimeRef.current =
-              -1;
-
+            lastVideoTimeRef.current = -1;
 
             detectFaceLandmarks();
 
           };
-
 
       } catch (err) {
 
@@ -711,11 +1077,9 @@ const FaceRecognition: React.FC = () => {
           err
         );
 
-
         setError(
           'Não foi possível acessar a câmera. Verifique as permissões.'
         );
-
 
       } finally {
 
@@ -727,83 +1091,81 @@ const FaceRecognition: React.FC = () => {
 
 
   /*
+    CANCELAR SCAN GUIADO
+  */
+
+  const cancelGuidedScan =
+    (): void => {
+
+      scanActiveRef.current = false;
+
+      holdFramesRef.current = 0;
+
+      capturedRef.current = {};
+
+      setIsScanning(false);
+
+      setStepIndex(-1);
+
+      setHoldFrames(0);
+
+      updateGuidance('');
+
+    };
+
+
+  /*
     PARAR CÂMERA
   */
 
   const stopCamera =
     (): void => {
 
+      cancelGuidedScan();
 
       if (
-        animationFrameRef.current !==
-        null
+        animationFrameRef.current !== null
       ) {
 
         cancelAnimationFrame(
           animationFrameRef.current
         );
 
-
-        animationFrameRef.current =
-          null;
+        animationFrameRef.current = null;
 
       }
 
+      const video = videoRef.current;
 
-      const video =
-        videoRef.current;
-
-
-      if (
-        video?.srcObject
-      ) {
+      if (video?.srcObject) {
 
         const stream =
-          video.srcObject as
-            MediaStream;
-
+          video.srcObject as MediaStream;
 
         stream
           .getTracks()
           .forEach(
-            (track) =>
-              track.stop()
+            (track) => track.stop()
           );
 
-
-        video.srcObject =
-          null;
+        video.srcObject = null;
 
       }
 
-
       setIsStreaming(false);
-
 
       setFaceLandmarks([]);
 
+      faceLandmarksRef.current = [];
 
-      faceLandmarksRef.current =
-        [];
+      lastVideoTimeRef.current = -1;
 
-
-      lastVideoTimeRef.current =
-        -1;
-
-
-      /*
-        Limpa Canvas
-      */
-
-      const canvas =
-        canvasRef.current;
-
+      const canvas = canvasRef.current;
 
       if (canvas) {
 
         const ctx =
           canvas.getContext('2d');
-
 
         if (ctx) {
 
@@ -822,23 +1184,13 @@ const FaceRecognition: React.FC = () => {
 
 
   /*
-    ESCANEAR ROSTO
+    INICIAR SCAN GUIADO (3 ÂNGULOS)
   */
 
-  const scanFace = async () => {
+  const startGuidedScan =
+    (): void => {
 
-
-      const video =
-        videoRef.current;
-
-
-      /*
-        Verifica câmera
-      */
-
-      if (
-        !video
-      ) {
+      if (!videoRef.current) {
 
         setError(
           'A câmera não está disponível.'
@@ -848,14 +1200,8 @@ const FaceRecognition: React.FC = () => {
 
       }
 
-
-      /*
-        Verifica landmarks
-      */
-
       if (
-        faceLandmarksRef.current
-          .length === 0
+        faceLandmarksRef.current.length === 0
       ) {
 
         setError(
@@ -866,187 +1212,34 @@ const FaceRecognition: React.FC = () => {
 
       }
 
+      setError('');
 
-      try {
+      setFaceScan(null);
 
-        setError('');
+      capturedRef.current = {};
 
+      frontLandmarksRef.current = [];
 
-        setIsScanning(true);
+      firstSideSignRef.current = 0;
 
+      holdFramesRef.current = 0;
 
-        /*
-          Cria Canvas temporário
-        */
+      stepIndexRef.current = 0;
 
-        const captureCanvas =
-          document.createElement(
-            'canvas'
-          );
+      cooldownUntilRef.current =
+        performance.now() + 500;
 
+      scanActiveRef.current = true;
 
-        captureCanvas.width =
-          video.videoWidth;
+      setStepIndex(0);
 
+      setHoldFrames(0);
 
-        captureCanvas.height =
-          video.videoHeight;
+      updateGuidance(
+        'Olhe reto para a câmera.'
+      );
 
-
-        const context =
-          captureCanvas
-            .getContext('2d');
-
-
-        if (
-          !context
-        ) {
-
-          throw new Error(
-            'Não foi possível criar o contexto da imagem.'
-          );
-
-        }
-
-
-        /*
-          Captura o frame atual
-        */
-
-        context.drawImage(
-          video,
-          0,
-          0,
-          captureCanvas.width,
-          captureCanvas.height
-        );
-
-
-        /*
-          Converte em imagem
-        */
-
-        const image =
-          captureCanvas.toDataURL(
-            'image/png'
-          );
-
-
-        /*
-          Cria Scan
-        */
-
-        const landmarks =
-          [
-            ...faceLandmarksRef.current
-          ];
-
-
-        /*
-          ANALISA O ROSTO
-        */
-
-        const analysis =
-          analyzeFace(
-            landmarks
-          );
-
-
-        /*
-          CRIA O SCAN
-        */
-
-        const scan:
-          FaceScan = {
-
-          landmarks,
-
-          image,
-
-          timestamp:
-            new Date()
-              .toISOString(),
-
-          analysis
-
-        };
-
-        const avatarRequest: AvatarRequest = {
-          image,
-
-          face: {
-            faceWidth: analysis.faceWidth,
-            faceHeight: analysis.faceHeight,
-            faceRatio: analysis.faceRatio,
-            faceShape: analysis.faceShape,
-            eyeDistance: analysis.eyeDistance
-          },
-
-          style: '3D'
-
-          
-        };
-
-        console.log('Avatar Request:', avatarRequest);
-
-        try {
-          const response = await fetch(
-            'http://localhost:3000/api/avatar/generate-gemini',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(avatarRequest)
-            }
-          );
-
-          const data = await response.json();
-
-          console.log('Resposta do Backend:', data);
-
-        } catch (error) {
-
-          console.error(
-            'Erro ao enviar dados para o backend:',
-            error
-          );
-
-        }
-
-        /*
-          Salva Scan
-        */
-
-        setFaceScan(
-          scan
-        );
-
-
-        console.log(
-          'Face scan completed:',
-          scan
-        );
-
-
-      } catch (err) {
-
-        console.error(
-          'Face scan error:',
-          err
-        );
-
-
-        setError(
-          'Ocorreu um erro ao escanear o rosto.'
-        );
-
-
-      } finally {
-
-        setIsScanning(false);
-
-      }
+      setIsScanning(true);
 
     };
 
@@ -1058,10 +1251,7 @@ const FaceRecognition: React.FC = () => {
   const resetScan =
     (): void => {
 
-      setFaceScan(
-        null
-      );
-
+      setFaceScan(null);
 
       setError('');
 
@@ -1076,13 +1266,12 @@ const FaceRecognition: React.FC = () => {
 
     initializeMediaPipe();
 
-
     return () => {
 
+      scanActiveRef.current = false;
 
       if (
-        animationFrameRef.current !==
-        null
+        animationFrameRef.current !== null
       ) {
 
         cancelAnimationFrame(
@@ -1091,17 +1280,9 @@ const FaceRecognition: React.FC = () => {
 
       }
 
+      if (faceLandmarkerRef.current) {
 
-      /*
-        Fecha MediaPipe
-      */
-
-      if (
-        faceLandmarkerRef.current
-      ) {
-
-        faceLandmarkerRef.current
-          .close();
+        faceLandmarkerRef.current.close();
 
       }
 
@@ -1110,21 +1291,25 @@ const FaceRecognition: React.FC = () => {
   }, []);
 
 
+  const guideBoxStyle: React.CSSProperties = {
+    margin: '16px 0',
+    padding: '16px',
+    borderRadius: 12,
+    background: 'rgba(0, 0, 0, 0.6)',
+    color: '#fff',
+    textAlign: 'center'
+  };
+
+
   return (
 
-    <div
-      className="
-        face-scanner
-      "
-    >
+    <div className="face-scanner">
 
 
       {/* HEADER */}
 
       <motion.div
-        className="
-          scanner-header
-        "
+        className="scanner-header"
 
         initial={{
           opacity: 0,
@@ -1137,60 +1322,31 @@ const FaceRecognition: React.FC = () => {
         }}
       >
 
-        <div
-          className="
-            scanner-logo
-          "
-        >
+        <div className="scanner-logo">
 
           <Camera size={32} />
 
         </div>
 
+        <h1>AI Face Scanner</h1>
 
-        <h1>
+        <p>Facial Landmark Detection</p>
 
-          AI Face Scanner
-
-        </h1>
-
-
-        <p>
-
-          Facial Landmark Detection
-
-        </p>
-
-
-        <div
-          className="
-            model-status
-          "
-        >
+        <div className="model-status">
 
           {isModelLoaded ? (
 
             <>
 
-              <CheckCircle
-                size={20}
-              />
+              <CheckCircle size={20} />
 
-              <span>
-
-                Face Landmarker Ready
-
-              </span>
+              <span>Face Landmarker Ready</span>
 
             </>
 
           ) : (
 
-            <span>
-
-              Loading AI Model...
-
-            </span>
+            <span>Loading AI Model...</span>
 
           )}
 
@@ -1206,32 +1362,18 @@ const FaceRecognition: React.FC = () => {
         {error && (
 
           <motion.div
-            className="
-              scanner-error
-            "
+            className="scanner-error"
 
-            initial={{
-              opacity: 0
-            }}
+            initial={{ opacity: 0 }}
 
-            animate={{
-              opacity: 1
-            }}
+            animate={{ opacity: 1 }}
 
-            exit={{
-              opacity: 0
-            }}
+            exit={{ opacity: 0 }}
           >
 
-            <AlertCircle
-              size={20}
-            />
+            <AlertCircle size={20} />
 
-            <span>
-
-              {error}
-
-            </span>
+            <span>{error}</span>
 
           </motion.div>
 
@@ -1242,38 +1384,20 @@ const FaceRecognition: React.FC = () => {
 
       {/* CAMERA CARD */}
 
-      <div
-        className="
-          scanner-container
-        "
-      >
+      <div className="scanner-container">
 
-        <div
-          className="
-            scanner-title
-          "
-        >
+        <div className="scanner-title">
 
-          <Camera
-            size={24}
-          />
+          <Camera size={24} />
 
-          <h2>
-
-            Live Face Scanner
-
-          </h2>
+          <h2>Live Face Scanner</h2>
 
         </div>
 
 
         {/* CAMERA */}
 
-        <div
-          className="
-            camera-container
-          "
-        >
+        <div className="camera-container">
 
           <video
             ref={videoRef}
@@ -1284,41 +1408,25 @@ const FaceRecognition: React.FC = () => {
 
             muted
 
-            className="
-              hidden-video
-            "
+            className="hidden-video"
           />
-
 
           {!isStreaming && (
 
-            <div
-              className="
-                camera-placeholder
-              "
-            >
+            <div className="camera-placeholder">
 
-              <Camera
-                size={64}
-              />
+              <Camera size={64} />
 
-              <p>
-
-                Camera feed will appear here
-
-              </p>
+              <p>Camera feed will appear here</p>
 
             </div>
 
           )}
 
-
           <canvas
             ref={canvasRef}
 
-            className="
-              camera-canvas
-            "
+            className="camera-canvas"
           />
 
         </div>
@@ -1328,45 +1436,27 @@ const FaceRecognition: React.FC = () => {
 
         {isStreaming && (
 
-          <div
-            className="
-              face-status
-            "
-          >
+          <div className="face-status">
 
             {faceLandmarks.length > 0 ? (
 
               <>
 
-                <CheckCircle
-                  size={20}
-                />
+                <CheckCircle size={20} />
 
-                <span>
-
-                  Face Detected
-
-                </span>
+                <span>Face Detected</span>
 
                 <strong>
-
                   {faceLandmarks.length}
-
                   {' '}
-
                   Landmarks
-
                 </strong>
 
               </>
 
             ) : (
 
-              <span>
-
-                Looking for face...
-
-              </span>
+              <span>Looking for face...</span>
 
             )}
 
@@ -1375,14 +1465,132 @@ const FaceRecognition: React.FC = () => {
         )}
 
 
+        {/* GUIA DO SCAN EM 3 ÂNGULOS */}
+
+        {isScanning && stepIndex >= 0 && (
+
+          <div style={guideBoxStyle}>
+
+            <div
+              style={{
+                fontSize: 12,
+                opacity: 0.8
+              }}
+            >
+              Etapa {stepIndex + 1} de {SCAN_STEPS.length}
+            </div>
+
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 700,
+                margin: '4px 0'
+              }}
+            >
+              {SCAN_STEPS[stepIndex].title}
+            </div>
+
+            <div style={{ fontSize: 14 }}>
+              {SCAN_STEPS[stepIndex].instruction}
+            </div>
+
+            <div
+              style={{
+                marginTop: 10,
+                fontSize: 14,
+                fontWeight: 600
+              }}
+            >
+              {guidance}
+            </div>
+
+            <div
+              style={{
+                height: 8,
+                borderRadius: 4,
+                background: 'rgba(255, 255, 255, 0.2)',
+                marginTop: 12,
+                overflow: 'hidden'
+              }}
+            >
+
+              <div
+                style={{
+                  height: '100%',
+                  width: `${(holdFrames / HOLD_FRAMES) * 100}%`,
+                  background: '#00ff88'
+                }}
+              />
+
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                gap: 8,
+                marginTop: 12
+              }}
+            >
+
+              {SCAN_STEPS.map((step, index) => (
+
+                <span
+                  key={step.title}
+
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    background:
+                      index < stepIndex
+                        ? '#00ff88'
+                        : index === stepIndex
+                          ? '#ffffff'
+                          : 'rgba(255, 255, 255, 0.3)'
+                  }}
+                />
+
+              ))}
+
+            </div>
+
+          </div>
+
+        )}
+
+
+        {isGenerating && (
+
+          <div style={guideBoxStyle}>
+
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 700
+              }}
+            >
+              Gerando seu avatar com as 3 imagens...
+            </div>
+
+            <div
+              style={{
+                fontSize: 13,
+                opacity: 0.8,
+                marginTop: 4
+              }}
+            >
+              Isso pode levar alguns segundos.
+            </div>
+
+          </div>
+
+        )}
+
+
         {/* BUTTONS */}
 
-        <div
-          className="
-            scanner-buttons
-          "
-        >
-
+        <div className="scanner-buttons">
 
           <button
             onClick={startCamera}
@@ -1393,15 +1601,10 @@ const FaceRecognition: React.FC = () => {
               isLoading
             }
 
-            className="
-              scanner-button
-              start-button
-            "
+            className="scanner-button start-button"
           >
 
-            <Play
-              size={20}
-            />
+            <Play size={20} />
 
             {isLoading
               ? 'Loading...'
@@ -1410,57 +1613,61 @@ const FaceRecognition: React.FC = () => {
 
           </button>
 
-
           <button
-            onClick={scanFace}
+            onClick={startGuidedScan}
 
             disabled={
               !isStreaming ||
               faceLandmarks.length === 0 ||
-              isScanning
+              isScanning ||
+              isGenerating
             }
 
-            className="
-              scanner-button
-              scan-button
-            "
+            className="scanner-button scan-button"
           >
 
-            <ScanFace
-              size={20}
-            />
+            <ScanFace size={20} />
 
-            {isScanning
-              ? 'Scanning...'
-              : 'Scan Face'
+            {isGenerating
+              ? 'Generating...'
+              : isScanning
+                ? 'Scanning...'
+                : 'Scan Face'
             }
 
           </button>
 
+          {isScanning && (
+
+            <button
+              onClick={cancelGuidedScan}
+
+              className="scanner-button stop-button"
+            >
+
+              <RotateCcw size={20} />
+
+              Cancel Scan
+
+            </button>
+
+          )}
 
           <button
             onClick={stopCamera}
 
-            disabled={
-              !isStreaming
-            }
+            disabled={!isStreaming}
 
-            className="
-              scanner-button
-              stop-button
-            "
+            className="scanner-button stop-button"
           >
 
-            <Square
-              size={20}
-            />
+            <Square size={20} />
 
             Stop Camera
 
           </button>
 
         </div>
-
 
       </div>
 
@@ -1472,9 +1679,7 @@ const FaceRecognition: React.FC = () => {
         {faceScan && (
 
           <motion.div
-            className="
-              scan-result
-            "
+            className="scan-result"
 
             initial={{
               opacity: 0,
@@ -1492,32 +1697,70 @@ const FaceRecognition: React.FC = () => {
             }}
           >
 
+            <div className="scan-result-header">
 
-            <div
-              className="
-                scan-result-header
-              "
-            >
+              <CheckCircle size={28} />
 
-              <CheckCircle
-                size={28}
-              />
-
-              <h3>
-
-                Face Scan Completed
-
-              </h3>
+              <h3>Face Scan Completed</h3>
 
             </div>
 
 
+            {/* MINIATURAS DAS 3 CAPTURAS */}
+
             <div
-              className="
-                scan-result-content
-              "
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                gap: 12,
+                margin: '12px 0'
+              }}
             >
 
+              {(
+                [
+                  ['Frente', faceScan.images.front],
+                  ['Esquerda', faceScan.images.left],
+                  ['Direita', faceScan.images.right]
+                ] as const
+              ).map(([label, src]) => (
+
+                <div
+                  key={label}
+
+                  style={{ textAlign: 'center' }}
+                >
+
+                  <img
+                    src={src}
+
+                    alt={label}
+
+                    style={{
+                      width: 110,
+                      height: 80,
+                      objectFit: 'cover',
+                      borderRadius: 8
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      fontSize: 12,
+                      marginTop: 4
+                    }}
+                  >
+                    {label}
+                  </div>
+
+                </div>
+
+              ))}
+
+            </div>
+
+
+            <div className="scan-result-content">
 
               {/* IMAGE */}
 
@@ -1540,68 +1783,32 @@ const FaceRecognition: React.FC = () => {
 
               {/* DATA */}
 
-              <div
-                className="
-                  scan-data
-                "
-              >
+              <div className="scan-data">
 
+                <div className="scan-data-item">
 
-                <div
-                  className="
-                    scan-data-item
-                  "
-                >
-
-                  <ImageIcon
-                    size={20}
-                  />
+                  <ImageIcon size={20} />
 
                   <div>
 
-                    <span>
+                    <span>Status</span>
 
-                      Status
-
-                    </span>
-
-                    <strong>
-
-                      Completed
-
-                    </strong>
+                    <strong>Completed</strong>
 
                   </div>
 
                 </div>
 
+                <div className="scan-data-item">
 
-                <div
-                  className="
-                    scan-data-item
-                  "
-                >
-
-                  <ScanFace
-                    size={20}
-                  />
+                  <ScanFace size={20} />
 
                   <div>
 
-                    <span>
-
-                      Facial Landmarks
-
-                    </span>
+                    <span>Facial Landmarks</span>
 
                     <strong>
-
-                      {
-                        faceScan
-                          .landmarks
-                          .length
-                      }
-
+                      {faceScan.landmarks.length}
                     </strong>
 
                   </div>
@@ -1612,16 +1819,10 @@ const FaceRecognition: React.FC = () => {
 
                   <div>
 
-                    <span>
-
-                      Face Shape
-
-                    </span>
+                    <span>Face Shape</span>
 
                     <strong>
-
                       {faceScan.analysis.faceShape}
-
                     </strong>
 
                   </div>
@@ -1632,64 +1833,35 @@ const FaceRecognition: React.FC = () => {
 
                   <div>
 
-                    <span>
-
-                      Face Ratio
-
-                    </span>
+                    <span>Face Ratio</span>
 
                     <strong>
-
-                      {
-                        faceScan
-                          .analysis
-                          .faceRatio
-                          .toFixed(2)
-                      }
-
+                      {faceScan.analysis.faceRatio.toFixed(2)}
                     </strong>
 
                   </div>
 
                 </div>
 
+                <div className="scan-data-item">
 
-                <div
-                  className="
-                    scan-data-item
-                  "
-                >
-
-                  <Camera
-                    size={20}
-                  />
+                  <Camera size={20} />
 
                   <div>
 
-                    <span>
-
-                      Capture Time
-
-                    </span>
+                    <span>Capture Time</span>
 
                     <strong>
-
-                      {
-                        new Date(
-                          faceScan.timestamp
-                        )
-                          .toLocaleTimeString()
-                      }
-
+                      {new Date(
+                        faceScan.timestamp
+                      ).toLocaleTimeString()}
                     </strong>
 
                   </div>
 
                 </div>
-
 
               </div>
-
 
             </div>
 
@@ -1697,20 +1869,14 @@ const FaceRecognition: React.FC = () => {
             <button
               onClick={resetScan}
 
-              className="
-                scanner-button
-                reset-button
-              "
+              className="scanner-button reset-button"
             >
 
-              <RotateCcw
-                size={20}
-              />
+              <RotateCcw size={20} />
 
               New Scan
 
             </button>
-
 
           </motion.div>
 
@@ -1718,14 +1884,10 @@ const FaceRecognition: React.FC = () => {
 
       </AnimatePresence>
 
-
     </div>
 
   );
 
 };
-
-
-
 
 export default FaceRecognition;

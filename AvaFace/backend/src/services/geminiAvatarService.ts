@@ -10,8 +10,15 @@ interface FaceCharacteristics {
   eyeDistance: number;
 }
 
+interface AvatarImages {
+  front: string;
+  left?: string;
+  right?: string;
+}
+
 interface AvatarRequest {
   image: string;
+  images?: AvatarImages;
   face: FaceCharacteristics;
   style: string;
 }
@@ -38,17 +45,64 @@ export async function generateAvatarWithGemini(
 ) {
   const {
     image,
+    images,
     face,
     style
   } = request;
 
-  const { mimeType, base64 } =
-    dataUrlToBase64(image);
+  // Monta a lista de fotos de referência. Se vierem as 3 imagens,
+  // usa todas; senão, cai para a foto frontal única (compatibilidade).
+  const views: { label: string; dataUrl: string }[] = [];
+
+  if (images?.front) {
+    views.push({ label: 'front view', dataUrl: images.front });
+
+    if (images.left) {
+      views.push({
+        label: "head turned to the person's left",
+        dataUrl: images.left
+      });
+    }
+
+    if (images.right) {
+      views.push({
+        label: "head turned to the person's right",
+        dataUrl: images.right
+      });
+    }
+  } else {
+    views.push({ label: 'front view', dataUrl: image });
+  }
+
+  const multiViewNote =
+    views.length > 1
+      ? `You are given ${views.length} reference photos of the SAME person ` +
+        `(front view, and the head turned to each side). Use all of them to ` +
+        `capture the real shape and color of the hair on the sides and above ` +
+        `the ears, the ears, the jawline and the overall head shape. ` +
+        `Generate ONE single front-facing avatar of this person — not a ` +
+        `collage and not multiple views.\n`
+      : '';
+
+  const imageParts = views.flatMap((view, index) => {
+    const { mimeType, base64 } =
+      dataUrlToBase64(view.dataUrl);
+
+    return [
+      { text: `Reference photo ${index + 1} (${view.label}):` },
+      {
+        inlineData: {
+          mimeType,
+          data: base64
+        }
+      }
+    ];
+  });
 
   // Prompt enxuto de propósito: dados numéricos crus (ex.: faceRatio)
   // atrapalham mais do que ajudam, e listas longas de "DO NOT" tendem
   // a produzir texturas de pele exageradas/estranhas neste modelo.
-  const prompt = `
+  const prompt = `${multiViewNote}
 Transform this photograph into a clean, polished ${style} avatar
 render (CGI character style) — smooth stylized shading, not a
 literal photograph, but clearly the same person.
@@ -63,7 +117,7 @@ Neutral, simple background.
 `;
 
   console.log(
-    'Enviando imagem para Gemini...'
+    `Enviando ${views.length} imagem(ns) para Gemini...`
   );
 
   const response = await client.models.generateContent({
@@ -73,12 +127,7 @@ Neutral, simple background.
         role: 'user',
         parts: [
           { text: prompt },
-          {
-            inlineData: {
-              mimeType,
-              data: base64
-            }
-          }
+          ...imageParts
         ]
       }
     ],
