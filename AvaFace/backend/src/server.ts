@@ -2,13 +2,15 @@ import 'dotenv/config';
 
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
 
 import { generateAvatar } from './services/avatarService.js';
 import { generateAvatarWithGemini } from './services/geminiAvatarService.js';
 import { generateAvatarWithInstantID } from './services/Instantidavatarservice.js';
-import { generateAvatarWithPollinations } from './services/pollinationsAvatarService.js';
-import { generateAvatarWithPhotoMaker } from './services/photoMakerAvatarService.js';
-import { generateAvatarWithPuLID } from './services/pulidAvatarService.js';
+import { generateAvatarWithPollinations } from './services/pollinationsavatarservice.js';
+import { generateAvatarWithPhotoMaker } from './services/photomakeravatarservice.js';
+import { generateAvatarWithPuLID } from './services/pulidavatarservice.js';
+import { generateAvatarVideo } from './services/veovideoservice.js';
 
 const app = express();
 
@@ -20,6 +22,11 @@ app.use(
   express.json({
     limit: '30mb'
   })
+);
+
+app.use(
+  '/generated',
+  express.static(path.resolve(process.cwd(), 'generated'))
 );
 
 app.get('/', (_req, res) => {
@@ -399,6 +406,28 @@ app.post(
   }
 );
 
+app.post('/api/avatar/generate-video', async (req, res) => {
+  const { image } = req.body;
+
+  if (typeof image !== 'string' || !image.startsWith('data:image/')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Envie a imagem do avatar no campo image.'
+    });
+  }
+
+  try {
+    const result = await generateAvatarVideo(image);
+    return res.json(result);
+  } catch (error) {
+    console.error('Erro ao gerar vídeo com Veo:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Não foi possível gerar o vídeo do avatar.'
+    });
+  }
+});
 
 app.listen(
   PORT,
