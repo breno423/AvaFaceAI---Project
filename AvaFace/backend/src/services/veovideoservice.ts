@@ -11,19 +11,14 @@ if (!apiKey) {
 
 const client = new GoogleGenAI({ apiKey });
 
-const MODEL_NAME = 'veo-3.1-generate-preview';
+const MODEL_NAME = "veo-3.1-fast-generate-preview";
 
 const PROMPT = `
-Animate the provided avatar image into a short, polished character
-animation. Preserve the person's recognizable facial identity,
-skin tone, hairstyle, eye color, clothing and original art style.
-
-The character looks directly at the camera, blinks naturally,
-makes a subtle friendly smile and gently tilts their head.
-Use smooth, restrained movement and stable lighting.
-Keep the background simple and consistent.
-No scene cuts, no camera shake, no face distortion,
-no changes to identity, no additional people.
+Animate the provided image into a short video.
+The character gently blinks once and makes a subtle smile.
+Preserve the original appearance and identity.
+Keep the camera fixed and lighting stable.
+No dialogue or intentional sound effects.
 `;
 
 function parseImageDataUrl(dataUrl: string) {
@@ -52,18 +47,19 @@ export async function generateAvatarVideo(image: string) {
   console.log('Iniciando geração de vídeo com Veo 3.1...');
 
   let operation = await client.models.generateVideos({
-    model: MODEL_NAME,
-    prompt: PROMPT,
-    image: {
-  imageBytes: imageBytes.toString('base64'),
-  mimeType: mimeType
-},
-    config: {
-      numberOfVideos: 1,
-      aspectRatio: '9:16',
-      resolution: '720p'
-    }
-  });
+   model: MODEL_NAME,
+  prompt: "Animate this image with very subtle natural movement. Keep the original appearance.",
+  image: {
+    imageBytes: imageBytes.toString("base64"),
+    mimeType,
+  },
+  config: {
+    numberOfVideos: 1,
+    aspectRatio: "9:16",
+    resolution: "720p",
+    durationSeconds: 4,
+  },
+});
 
   // A geração de vídeo é assíncrona.
   // Consultamos o status até o resultado estar pronto.
