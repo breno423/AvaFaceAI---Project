@@ -1,15 +1,5 @@
-/* ========================================
-   AVAFACE - FACE RECOGNITION
-   Sistema de identidade visual + CSS profissional
-   (apenas classes já existentes no projeto foram usadas —
-   nenhum HTML/JSX precisa ser alterado)
-======================================== */
-
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap');
 
-/* ========================================
-   DESIGN TOKENS
-======================================== */
 :root {
   --bg: #0a0b10;
   --surface: rgba(255, 255, 255, 0.04);
@@ -40,14 +30,6 @@
   color-scheme: dark;
 }
 
-/* ========================================
-   RESET DEFENSIVO
-   Garante que o container raiz do Vite (html/body/#root) não
-   fique com max-width, padding ou text-align herdados do
-   boilerplate, o que costuma empurrar o layout para um lado
-   e quebrar a centralização em telas grandes.
-======================================== */
-
 html,
 body {
   margin: 0;
@@ -63,13 +45,6 @@ body {
   padding: 0;
   text-align: left;
 }
-
-/* ========================================
-   PAGE
-   Fundo único, sólido, sem manchas nem grade — só uma cor,
-   igual em html/body/#root/.face-scanner, para não haver
-   nenhuma costura visível em nenhuma largura de tela.
-======================================== */
 
 html,
 body,
@@ -113,11 +88,6 @@ body,
   }
 }
 
-/* ========================================
-   CRÉDITO — Unifan × Finc
-   Gerado via CSS (::after), sem precisar tocar no JSX.
-======================================== */
-
 .face-scanner::after {
   content: 'UNIFAN  ×  FINC   —   Inteligência Artificial aplicada ao reconhecimento facial';
   display: block;
@@ -130,10 +100,6 @@ body,
   color: var(--text-faint);
 }
 
-/* ========================================
-   HEADER
-======================================== */
-
 .scanner-header {
   position: relative;
   display: flex;
@@ -145,10 +111,6 @@ body,
   padding-top: 12px;
 }
 
-/* Brilho contido atrás da logo — um único glow, delimitado a um
-   círculo de tamanho fixo centralizado no header (não é um fundo
-   de página inteira), então nunca cria emenda/costura visível,
-   mesmo em telas ultralargas. */
 .scanner-header::before {
   content: '';
   position: absolute;
@@ -168,9 +130,6 @@ body,
   z-index: 1;
 }
 
-/* Selo "IA" sobreposto à logo — reforça que a inteligência
-   artificial é o elemento central do produto (pedido do briefing
-   Unifan/Finc). Gerado via CSS, sem exigir mudança no JSX. */
 .scanner-logo {
   position: relative;
   width: 76px;
@@ -221,10 +180,6 @@ body,
   background-repeat: no-repeat;
 }
 
-/* Pulso de "leitura ativa" — via box-shadow no próprio elemento,
-   sem precisar de um terceiro pseudo-elemento (::after já é usado
-   pelo selo "IA" acima). Único momento de movimento orquestrado,
-   não repetido nos demais componentes. */
 @keyframes logoGlowPulse {
   0%, 100% {
     box-shadow: 0 10px 40px rgba(139, 92, 246, 0.35), 0 0 0 0 rgba(139, 92, 246, 0.32);
@@ -265,10 +220,6 @@ body,
   max-width: 480px;
 }
 
-/* ========================================
-   MODEL STATUS
-======================================== */
-
 .model-status {
   display: flex;
   align-items: center;
@@ -288,10 +239,6 @@ body,
   flex-shrink: 0;
 }
 
-/* ========================================
-   ERROR
-======================================== */
-
 .scanner-error {
   display: flex;
   align-items: center;
@@ -307,10 +254,6 @@ body,
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
-/* ========================================
-   MAIN SCANNER CARD
-======================================== */
-
 .scanner-container {
   position: relative;
   width: 100%;
@@ -324,9 +267,6 @@ body,
   isolation: isolate;
 }
 
-/* Borda em degradê — o card "principal" ganha um contorno sutil
-   violeta → ciano, reforçando que é aqui que a IA atua, sem recorrer
-   a nenhum efeito espalhado pela página inteira. */
 .scanner-container::before {
   content: '';
   position: absolute;
@@ -340,10 +280,6 @@ body,
   pointer-events: none;
   z-index: -1;
 }
-
-/* ========================================
-   SCANNER TITLE
-======================================== */
 
 .scanner-title {
   display: flex;
@@ -364,10 +300,6 @@ body,
   font-weight: 600;
   color: var(--text);
 }
-
-/* ========================================
-   CAMERA
-======================================== */
 
 .camera-container {
   position: relative;
@@ -417,11 +349,6 @@ body,
   letter-spacing: 4px;
 }
 
-/*
-  VIDEO FICA ESCONDIDO.
-  O canvas é responsável por mostrar o vídeo + landmarks.
-*/
-
 .hidden-video {
   position: absolute;
   width: 1px;
@@ -429,10 +356,6 @@ body,
   opacity: 0;
   pointer-events: none;
 }
-
-/* ========================================
-   CANVAS
-======================================== */
 
 .camera-canvas {
   position: absolute;
@@ -442,10 +365,6 @@ body,
   height: 100%;
   display: block;
 }
-
-/* ========================================
-   CAMERA PLACEHOLDER
-======================================== */
 
 .camera-placeholder {
   position: absolute;
@@ -469,10 +388,6 @@ body,
   margin: 0;
   font-size: 15.5px;
 }
-
-/* ========================================
-   FACE STATUS
-======================================== */
 
 .face-status {
   display: flex;
@@ -500,10 +415,6 @@ body,
   font-size: 13.5px;
   font-weight: 600;
 }
-
-/* ========================================
-   BUTTONS
-======================================== */
 
 .scanner-buttons {
   display: flex;
@@ -544,10 +455,6 @@ body,
   cursor: not-allowed;
 }
 
-/* ========================================
-   START BUTTON
-======================================== */
-
 .start-button {
   background: linear-gradient(135deg, #10b981, #059669);
   box-shadow: 0 8px 25px rgba(16, 185, 129, 0.25);
@@ -557,13 +464,6 @@ body,
   box-shadow: 0 12px 30px rgba(16, 185, 129, 0.4);
 }
 
-/* ========================================
-   SCAN BUTTON
-======================================== */
-
-/* Botão de IA — é a ação central do produto ("gerar avatar via IA"),
-   então ganha um leve brilho deslizante contínuo para se destacar
-   dos demais botões, que ficam estáticos. */
 .scan-button {
   position: relative;
   overflow: hidden;
@@ -589,10 +489,6 @@ body,
   box-shadow: 0 12px 35px rgba(139, 92, 246, 0.5);
 }
 
-/* ========================================
-   STOP BUTTON
-======================================== */
-
 .stop-button {
   background: linear-gradient(135deg, #ef4444, #dc2626);
   box-shadow: 0 8px 25px rgba(239, 68, 68, 0.25);
@@ -601,10 +497,6 @@ body,
 .stop-button:hover:not(:disabled) {
   box-shadow: 0 12px 30px rgba(239, 68, 68, 0.4);
 }
-
-/* ========================================
-   SCAN RESULT
-======================================== */
 
 .scan-result {
   width: 100%;
@@ -615,10 +507,6 @@ body,
   border: 1px solid rgba(74, 222, 128, 0.25);
   box-shadow: var(--shadow-2);
 }
-
-/* ========================================
-   SCAN RESULT HEADER
-======================================== */
 
 .scan-result-header {
   display: flex;
@@ -641,10 +529,6 @@ body,
   color: var(--text);
 }
 
-/* ========================================
-   RESULT CONTENT
-======================================== */
-
 .scan-result-content {
   display: grid;
   grid-template-columns: 260px 1fr;
@@ -653,10 +537,6 @@ body,
   max-width: 850px;
   margin: 0 auto;
 }
-
-/* ========================================
-   CAPTURE IMAGE
-======================================== */
 
 .scan-image-container {
   width: 260px;
@@ -674,10 +554,6 @@ body,
   display: block;
   object-fit: cover;
 }
-
-/* ========================================
-   SCAN DATA
-======================================== */
 
 .scan-data {
   display: flex;
@@ -724,10 +600,6 @@ body,
   font-weight: 600;
 }
 
-/* ========================================
-   RESET BUTTON
-======================================== */
-
 .reset-button {
   width: 100%;
   max-width: 850px;
@@ -739,10 +611,6 @@ body,
 .reset-button:hover:not(:disabled) {
   background: linear-gradient(135deg, #4b5563, #6b7280);
 }
-
-/* ========================================
-   RESPONSIVE
-======================================== */
 
 @media (max-width: 1024px) {
   .face-scanner {
@@ -763,10 +631,6 @@ body,
     height: 220px;
   }
 }
-
-/* ========================================
-   TABLET
-======================================== */
 
 @media (max-width: 768px) {
   .face-scanner {
@@ -819,10 +683,6 @@ body,
     text-align: left;
   }
 }
-
-/* ========================================
-   MOBILE
-======================================== */
 
 @media (max-width: 480px) {
   .face-scanner {
@@ -882,5 +742,279 @@ body,
   .scanner-button {
     min-width: 100%;
     padding: 15px 20px;
+  }
+}
+
+@keyframes boxRise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dotPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0); }
+}
+
+@keyframes spinnerRotate {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes frameBreathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+.camera-container::after {
+  content: '';
+  position: absolute;
+  inset: 18px;
+  z-index: 3;
+  pointer-events: none;
+  --corner: rgba(167, 139, 250, 0.85);
+  --len: 34px;
+  --w: 3px;
+  background:
+    linear-gradient(var(--corner), var(--corner)) top left / var(--len) var(--w),
+    linear-gradient(var(--corner), var(--corner)) top left / var(--w) var(--len),
+    linear-gradient(var(--corner), var(--corner)) top right / var(--len) var(--w),
+    linear-gradient(var(--corner), var(--corner)) top right / var(--w) var(--len),
+    linear-gradient(var(--corner), var(--corner)) bottom left / var(--len) var(--w),
+    linear-gradient(var(--corner), var(--corner)) bottom left / var(--w) var(--len),
+    linear-gradient(var(--corner), var(--corner)) bottom right / var(--len) var(--w),
+    linear-gradient(var(--corner), var(--corner)) bottom right / var(--w) var(--len);
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.5));
+  animation: frameBreathe 2.6s ease-in-out infinite;
+}
+
+.scanner-container:has(> div[style*="text-align"]) .camera-container::after {
+  --corner: rgba(74, 222, 128, 0.95);
+  filter: drop-shadow(0 0 8px rgba(74, 222, 128, 0.55));
+}
+
+.scanner-container > div[style] {
+  position: relative;
+  margin: 20px 0 0 !important;
+  padding: 22px 24px !important;
+  border-radius: var(--radius-lg) !important;
+  background:
+    linear-gradient(180deg, rgba(139, 92, 246, 0.10), rgba(99, 102, 241, 0.04)) !important;
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  box-shadow: var(--shadow-1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: var(--text) !important;
+  text-align: center;
+  overflow: hidden;
+  animation: boxRise 0.35s ease-out both;
+}
+
+.scanner-container > div[style]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--brand-c), transparent);
+  opacity: 0.8;
+}
+
+.scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(1) {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 4px 12px;
+  border-radius: 100px;
+  background: rgba(34, 211, 238, 0.10);
+  border: 1px solid rgba(34, 211, 238, 0.28);
+  color: var(--brand-c);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px !important;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 1 !important;
+}
+
+.scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(2) {
+  margin: 8px 0 6px !important;
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(3) {
+  max-width: 520px;
+  margin: 0 auto;
+  font-size: 14.5px !important;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(4) {
+  display: inline-block;
+  min-height: 38px;
+  margin-top: 16px !important;
+  padding: 9px 18px;
+  border-radius: 12px;
+  background: rgba(74, 222, 128, 0.10);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  color: #bbf7d0;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.4;
+}
+
+.scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(5) {
+  height: 10px !important;
+  max-width: 420px;
+  margin: 18px auto 0 !important;
+  border-radius: 100px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(5) > div {
+  border-radius: 100px;
+  background: linear-gradient(90deg, #22d3ee, #4ade80) !important;
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.55);
+  transition: width 0.12s linear;
+}
+
+.scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(6) {
+  gap: 12px !important;
+  margin-top: 18px !important;
+}
+
+.scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(6) > span {
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  transition: background 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+}
+
+.scanner-container > div[style] > div:nth-child(6) > span[style*="rgb(0, 255, 136)"],
+.scanner-container > div[style] > div:nth-child(6) > span[style*="#00ff88"] {
+  border-color: var(--success);
+  box-shadow: 0 0 10px rgba(74, 222, 128, 0.6);
+}
+
+.scanner-container > div[style] > div:nth-child(6) > span[style*="rgb(255, 255, 255)"],
+.scanner-container > div[style] > div:nth-child(6) > span[style*="#ffffff"] {
+  border-color: var(--brand-a);
+  transform: scale(1.25);
+  animation: dotPulse 1.6s ease-in-out infinite;
+}
+
+.scanner-container > div[style]:not(:has(> div:nth-child(3))) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 24px !important;
+  border-color: rgba(34, 211, 238, 0.28);
+  background:
+    linear-gradient(180deg, rgba(34, 211, 238, 0.08), rgba(139, 92, 246, 0.06)) !important;
+}
+
+.scanner-container > div[style]:not(:has(> div:nth-child(3)))::after {
+  content: '';
+  order: -1;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--brand-c);
+  border-right-color: var(--brand-a);
+  animation: spinnerRotate 0.9s linear infinite;
+}
+
+.scanner-container > div[style]:not(:has(> div:nth-child(3))) > div:nth-child(1) {
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  color: var(--text);
+}
+
+.scanner-container > div[style]:not(:has(> div:nth-child(3))) > div:nth-child(2) {
+  font-size: 13.5px !important;
+  color: var(--text-muted);
+  opacity: 1 !important;
+}
+
+.scan-result > div[style*="justify-content"] {
+  flex-wrap: wrap;
+  gap: 18px !important;
+  margin: 0 0 30px !important;
+}
+
+.scan-result > div[style*="justify-content"] > div {
+  padding: 8px 8px 10px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.scan-result > div[style*="justify-content"] > div:hover {
+  transform: translateY(-3px);
+  border-color: rgba(74, 222, 128, 0.45);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(74, 222, 128, 0.15);
+}
+
+.scan-result > div[style*="justify-content"] img {
+  display: block;
+  width: 150px !important;
+  height: 108px !important;
+  border-radius: 10px !important;
+  background: #000;
+}
+
+.scan-result > div[style*="justify-content"] > div > div {
+  margin-top: 8px !important;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px !important;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 768px) {
+  .scanner-container > div[style] {
+    padding: 18px 16px !important;
+  }
+
+  .scanner-container > div[style]:has(> div:nth-child(3)) > div:nth-child(2) {
+    font-size: 20px !important;
+  }
+
+  .camera-container::after {
+    inset: 12px;
+    --len: 26px;
+  }
+
+  .scan-result > div[style*="justify-content"] img {
+    width: 120px !important;
+    height: 88px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .scan-result > div[style*="justify-content"] {
+    gap: 10px !important;
+  }
+
+  .scan-result > div[style*="justify-content"] img {
+    width: 96px !important;
+    height: 72px !important;
+  }
+
+  .camera-container::after {
+    inset: 8px;
+    --len: 20px;
   }
 }
