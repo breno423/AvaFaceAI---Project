@@ -11,14 +11,15 @@ if (!apiKey) {
 
 const client = new GoogleGenAI({ apiKey });
 
-const MODEL_NAME = "veo-3.1-fast-generate-preview";
+const MODEL_NAME = "veo-3.1-lite-generate-preview";
 
 const PROMPT = `
-Animate the provided image into a short video.
-The character gently blinks once and makes a subtle smile.
-Preserve the original appearance and identity.
-Keep the camera fixed and lighting stable.
-No dialogue or intentional sound effects.
+Animate the provided image into a natural 4-second video.
+Preserve the character's original appearance and identity.
+The character gently blinks and smiles while looking at the camera.
+The character speaks clearly in Brazilian Portuguese, saying exactly: "Olá!"
+Use a natural Brazilian Portuguese voice.
+Keep the camera fixed and the lighting stable.
 `;
 
 function parseImageDataUrl(dataUrl: string) {

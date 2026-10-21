@@ -18,7 +18,9 @@ import {
   Square,
   ScanFace,
   RotateCcw,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Maximize2,
+  X
 } from 'lucide-react';
 
 import {
@@ -344,6 +346,14 @@ const FaceRecognition: React.FC = () => {
   /*
     STATES
   */
+  const [isAvatarFullscreen, setIsAvatarFullscreen] = useState(false);
+
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
+
+  const [selectedQuestion, setSelectedQuestion] = useState<string | null>(null);
+
+
+  const [generatedAvatar, setGeneratedAvatar] = useState<string | null>(null);  
 
   const [isLoading, setIsLoading] =
     useState(false);
@@ -622,6 +632,11 @@ const FaceRecognition: React.FC = () => {
 
         }
 
+        setGeneratedAvatar(data.image);
+
+        setIsAvatarFullscreen(false);
+        generateRandomQuestions();
+
         console.log(
           'Resposta do Backend:',
           data
@@ -661,6 +676,66 @@ const FaceRecognition: React.FC = () => {
 
     };
 
+    const questionPool = [
+  'Que profissão combina com meu visual?',
+  'Que curso você imaginaria para mim?',
+  'Se eu fosse um personagem, como seria?',
+  'Qual estilo combina mais comigo?',
+  'Que nome você daria ao meu avatar?',
+  'Que tipo de personagem eu seria em um filme?',
+  'Qual seria meu superpoder?',
+  'Que universo de jogo combina com meu avatar?',
+  'Como você descreveria meu visual?',
+  'Que impressão meu avatar transmite?'
+];
+
+const generateRandomQuestions = () => {
+  const shuffled = [...questionPool].sort(() => Math.random() - 0.5);
+  setSuggestedQuestions(shuffled.slice(0, 3));
+  setSelectedQuestion(null);
+};
+
+  const [chatAnswer, setChatAnswer] = useState('');
+   const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const askAvatarAI = async (question: string) => {
+  if (!generatedAvatar) return;
+
+  setSelectedQuestion(question);
+  setChatAnswer('');
+  setIsChatLoading(true);
+
+  try {
+    const response = await fetch(
+      'http://localhost:3000/api/avatar/chat',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          question,
+          image: generatedAvatar
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message ?? 'Erro ao consultar a IA.');
+    }
+
+    setChatAnswer(data.answer);
+  } catch (err) {
+    console.error('Erro no chat do avatar:', err);
+    setChatAnswer(
+      'Não consegui responder agora. Verifique se o serviço de chat está disponível.'
+    );
+  } finally {
+    setIsChatLoading(false);
+  }
+  };
 
   /*
     AVALIA A POSE ATUAL
@@ -1303,6 +1378,8 @@ const FaceRecognition: React.FC = () => {
 
   return (
 
+    
+
     <div className="face-scanner">
 
 
@@ -1765,21 +1842,31 @@ const FaceRecognition: React.FC = () => {
               {/* IMAGE */}
 
               <div className="scan-image-container scanned-container">
+                {generatedAvatar ? (
+                  <div className="avatar-preview">
+                    <img
+                      src={generatedAvatar}
+                      alt="Avatar gerado pela IA"
+                      className="generated-avatar"
+                    />
 
-                <div className="scanned-content">
-
-                  <span className="scanned-icon">
-                    ✓
-                  </span>
-
-                  <span className="scanned-text">
-                    SCANNED
-                  </span>
-
-                </div>
-
+                    <button
+                      type="button"
+                      className="avatar-fullscreen-button"
+                      onClick={() => setIsAvatarFullscreen(true)}
+                      aria-label="Abrir avatar em tela cheia"
+                    >
+                      <Maximize2 size={20} />
+                      Ver em tela cheia
+                    </button>
+                  </div>
+                ) : (
+                  <div className="scanned-content">
+                    <span className="scanned-icon">✓</span>
+                    <span className="scanned-text">SCANNED</span>
+                  </div>
+                )}
               </div>
-
 
               {/* DATA */}
 
@@ -1883,6 +1970,79 @@ const FaceRecognition: React.FC = () => {
         )}
 
       </AnimatePresence>
+
+      <AnimatePresence>
+  {isAvatarFullscreen && generatedAvatar && (
+    <motion.div
+      className="avatar-fullscreen"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <button
+        type="button"
+        className="avatar-close-button"
+        onClick={() => setIsAvatarFullscreen(false)}
+        aria-label="Fechar tela cheia"
+      >
+        <X size={24} />
+      </button>
+
+      <div className="avatar-fullscreen-content">
+        <h2>Conheça seu avatar</h2>
+
+        <p className="avatar-subtitle">
+          Escolha uma pergunta e descubra o que a IA tem a dizer.
+        </p>
+
+        <img
+          src={generatedAvatar}
+          alt="Seu avatar"
+          className="avatar-fullscreen-image"
+        />
+
+        <div className="avatar-question-list">
+          {suggestedQuestions.map((question) => (
+            <button
+              type="button"
+              key={question}
+              className={`avatar-question-bubble ${
+                selectedQuestion === question ? 'selected' : ''
+              }`}
+              onClick={() => askAvatarAI(question)}
+              disabled={isChatLoading}
+            >
+              <span>✨</span> {question}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          className="avatar-refresh-questions"
+          onClick={generateRandomQuestions}
+          disabled={isChatLoading}
+        >
+          <RotateCcw size={16} />
+          Outras perguntas
+        </button>
+
+        {(isChatLoading || chatAnswer) && (
+          <div className="avatar-chat-answer" aria-live="polite">
+            {isChatLoading ? (
+              <p>A IA está pensando...</p>
+            ) : (
+              <>
+                <strong>Resposta da IA</strong>
+                <p>{chatAnswer}</p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  )}
+</AnimatePresence>
 
     </div>
 
