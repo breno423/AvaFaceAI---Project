@@ -35,6 +35,8 @@ import {
 } from '../services/FaceAnalyzer.ts';
 
 import './FaceRecognition.css';
+import AvatarVideo from './AvatarVideo.tsx';
+import { apiUrl } from '../services/api.ts';
 import type {
   AvatarRequest,
   AvatarImages
@@ -46,7 +48,7 @@ import type {
 */
 
 const AVATAR_API_URL =
-  'http://localhost:3000/api/avatar/generate-gemini';
+  apiUrl('/api/avatar/generate-gemini');
 
 /*
   Quantos frames seguidos a pose precisa
@@ -707,7 +709,7 @@ const generateRandomQuestions = () => {
 
   try {
     const response = await fetch(
-      'http://localhost:3000/api/avatar/chat',
+      apiUrl('/api/avatar/chat'),
       {
         method: 'POST',
         headers: {
@@ -1291,6 +1293,9 @@ const generateRandomQuestions = () => {
 
       setFaceScan(null);
 
+      setGeneratedAvatar(null);
+      setIsAvatarFullscreen(false);
+
       capturedRef.current = {};
 
       frontLandmarksRef.current = [];
@@ -1327,6 +1332,9 @@ const generateRandomQuestions = () => {
     (): void => {
 
       setFaceScan(null);
+
+      setGeneratedAvatar(null);
+      setIsAvatarFullscreen(false);
 
       setError('');
 
@@ -1952,6 +1960,10 @@ const generateRandomQuestions = () => {
 
             </div>
 
+
+            {generatedAvatar && (
+              <AvatarVideo key={faceScan.timestamp} image={generatedAvatar} />
+            )}
 
             <button
               onClick={resetScan}

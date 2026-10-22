@@ -1,0 +1,1938 @@
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index 3f896c90f952299ad689826a3119cffce85040b7..cc89967298e49947131364060e082f2878dca354 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -41,6 +41,8 @@ jobs:
+ 
+       - name: Build
+         working-directory: ./AvaFace
++        env:
++          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+         run: npm run build
+ 
+       - name: Setup Pages
+@@ -53,4 +55,4 @@ jobs:
+ 
+       - name: Deploy to GitHub Pages
+         id: deployment
+-        uses: actions/deploy-pages@v4
+\ No newline at end of file
++        uses: actions/deploy-pages@v4
+diff --git a/AvaFace/.env.example b/AvaFace/.env.example
+new file mode 100644
+index 0000000000000000000000000000000000000000..ba11ad355621a32480e27255704dff25814f3da2
+--- /dev/null
++++ b/AvaFace/.env.example
+@@ -0,0 +1,3 @@
++# Desenvolvimento: deixe vazio para usar o proxy do Vite (backend na porta 3000).
++# GitHub Pages: informe a URL HTTPS pública do backend, sem /api no final.
++VITE_API_BASE_URL=
+diff --git a/AvaFace/backend/.env.example b/AvaFace/backend/.env.example
+new file mode 100644
+index 0000000000000000000000000000000000000000..68a7e4860d65dba45f84ecf6d2611a82f82eb398
+--- /dev/null
++++ b/AvaFace/backend/.env.example
+@@ -0,0 +1,16 @@
++# Chave do Google AI Studio com acesso ao modelo de vídeo e faturamento habilitado.
++# Preencha somente backend/.env ou os secrets do servidor. Nunca use VITE_ para chaves.
++GEMINI_API_KEY=
++
++# Modelos atuais da Gemini API. Veo 3.1 Preview foi desativado em 22/10/2026.
++VIDEO_MODEL=gemini-omni-1.1-flash
++GEMINI_IMAGE_MODEL=gemini-nano-banana-2.1
++GEMINI_CHAT_MODEL=gemini-3.8-flash
++
++PORT=3000
++# Opcional: origem exata do front-end, sem caminho/barra final.
++# Exemplo para GitHub Pages: https://breno423.github.io
++FRONTEND_ORIGIN=
++
++# Opcional, apenas para os provedores alternativos de imagem que já existiam.
++HF_TOKEN=
+diff --git a/AvaFace/backend/package.json b/AvaFace/backend/package.json
+index ba9632db82ee09e00a05903ee9904a902973e566..9b94e2cd7a66900c1eb3dcd7873eba706104e2ee 100644
+--- a/AvaFace/backend/package.json
++++ b/AvaFace/backend/package.json
+@@ -6,7 +6,9 @@
+   "scripts": {
+     "dev": "tsx watch src/server.ts",
+     "build": "tsc",
+-    "start": "node dist/server.js"
++    "start": "node dist/server.js",
++    "test": "node --import tsx --test tests/*.test.ts",
++    "models": "tsx src/listGeminiModels.ts"
+   },
+   "dependencies": {
+     "@google/genai": "^2.23.0",
+diff --git a/AvaFace/backend/src/routes/avatarVideo.ts b/AvaFace/backend/src/routes/avatarVideo.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0dc4ffb8e7e962d6cc3a688d492ceb6c415880c0
+--- /dev/null
++++ b/AvaFace/backend/src/routes/avatarVideo.ts
+@@ -0,0 +1,131 @@
++import { Router } from 'express';
++import { createHash, randomUUID } from 'node:crypto';
++import {
++  assertVideoConfigured,
++  generateAvatarVideo,
++  parseAvatarImage,
++  publicVideoError,
++  type AvatarVideoResult
++} from '../services/veovideoservice.js';
++
++interface VideoJob {
++  jobId: string;
++  requestId?: string;
++  imageHash: string;
++  status: 'processing' | 'completed' | 'failed';
++  videoUrl?: string;
++  message?: string;
++  finishedAt?: number;
++}
++
++interface VideoRouterOptions {
++  generate?: (image: string) => Promise<AvatarVideoResult>;
++  assertConfigured?: () => void;
++  maxConcurrent?: number;
++  maxJobs?: number;
++  jobTtlMs?: number;
++  now?: () => number;
++}
++
++/** Jobs live in this server process. Use one instance or a shared queue in production. */
++export function createAvatarVideoRouter(options: VideoRouterOptions = {}) {
++  const router = Router();
++  const jobs = new Map<string, VideoJob>();
++  const requestIds = new Map<string, string>();
++  const generate = options.generate ?? generateAvatarVideo;
++  const assertConfigured = options.assertConfigured ?? assertVideoConfigured;
++  const maxConcurrent = options.maxConcurrent ?? 2;
++  const maxJobs = options.maxJobs ?? 100;
++  const jobTtlMs = options.jobTtlMs ?? 60 * 60_000;
++  const now = options.now ?? Date.now;
++
++  const prune = () => {
++    for (const [id, job] of jobs) {
++      if (job.finishedAt !== undefined && now() - job.finishedAt >= jobTtlMs) {
++        jobs.delete(id);
++        if (job.requestId) requestIds.delete(job.requestId);
++      }
++    }
++  };
++
++  const publicJob = (job: VideoJob) => ({
++    success: true,
++    jobId: job.jobId,
++    status: job.status,
++    ...(job.videoUrl ? { videoUrl: job.videoUrl } : {}),
++    ...(job.message ? { message: job.message } : {})
++  });
++
++  router.post('/generate-video', (req, res) => {
++    try {
++      const image: unknown = req.body?.image;
++      const requestId: unknown = req.body?.requestId;
++      parseAvatarImage(image);
++      if (requestId !== undefined && (
++        typeof requestId !== 'string' ||
++        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)
++      )) {
++        return res.status(400).json({ success: false, message: 'O identificador da solicitação é inválido.' });
++      }
++
++      assertConfigured();
++      prune();
++      res.set('Cache-Control', 'no-store');
++      const imageHash = createHash('sha256').update(image as string).digest('hex');
++      const existingId = typeof requestId === 'string' ? requestIds.get(requestId) : undefined;
++      const existing = existingId ? jobs.get(existingId) : undefined;
++      if (existing) {
++        if (existing.imageHash !== imageHash) {
++          return res.status(409).json({ success: false, message: 'Este identificador já foi usado para outro avatar.' });
++        }
++        return res.status(existing.status === 'processing' ? 202 : 200).json(publicJob(existing));
++      }
++
++      const active = [...jobs.values()].filter((job) => job.status === 'processing').length;
++      if (active >= maxConcurrent || jobs.size >= maxJobs) {
++        res.set('Retry-After', '30');
++        return res.status(429).json({
++          success: false,
++          message: 'O servidor já está processando outros vídeos. Aguarde e tente novamente.'
++        });
++      }
++
++      const job: VideoJob = {
++        jobId: randomUUID(),
++        imageHash,
++        status: 'processing',
++        ...(typeof requestId === 'string' ? { requestId } : {})
++      };
++      jobs.set(job.jobId, job);
++      if (job.requestId) requestIds.set(job.requestId, job.jobId);
++      res.status(202).json(publicJob(job));
++
++      // Do not hold an HTTP connection open while the provider renders the video.
++      Promise.resolve().then(() => generate(image as string)).then((result) => {
++        job.videoUrl = result.videoUrl;
++        job.status = 'completed';
++        job.finishedAt = now();
++      }).catch((error: unknown) => {
++        job.message = publicVideoError(error).message;
++        job.status = 'failed';
++        job.finishedAt = now();
++      });
++    } catch (error) {
++      const safeError = publicVideoError(error);
++      return res.status(safeError.statusCode).json({ success: false, message: safeError.message });
++    }
++  });
++
++  router.get('/video-jobs/:jobId', (req, res) => {
++    prune();
++    res.set('Cache-Control', 'no-store');
++    const job = jobs.get(req.params.jobId);
++    if (!job) {
++      return res.status(404).json({ success: false, message: 'Geração não encontrada ou expirada. Gere um novo vídeo.' });
++    }
++
++    return res.json(publicJob(job));
++  });
++
++  return router;
++}
+diff --git a/AvaFace/backend/src/server.ts b/AvaFace/backend/src/server.ts
+index 3a2dc76cb2f2dcf9505714ebca2258411af8bed4..0d606be95a340118532d2528c3e305b98c41047b 100644
+--- a/AvaFace/backend/src/server.ts
++++ b/AvaFace/backend/src/server.ts
+@@ -10,14 +10,16 @@ import { generateAvatarWithInstantID } from './services/Instantidavatarservice.j
+ import { generateAvatarWithPollinations } from './services/pollinationsavatarservice.js';
+ import { generateAvatarWithPhotoMaker } from './services/photomakeravatarservice.js';
+ import { generateAvatarWithPuLID } from './services/pulidavatarservice.js';
+-import { generateAvatarVideo } from './services/veovideoservice.js';
++import { createAvatarVideoRouter } from './routes/avatarVideo.js';
+ import { GoogleGenAI } from '@google/genai';
+ 
+ const app = express();
+ 
+-const PORT = 3000;
++const PORT = Number(process.env.PORT || 3000);
+ 
+-app.use(cors());
++app.use(cors({
++  origin: process.env.FRONTEND_ORIGIN || true
++}));
+ 
+ app.use(
+   express.json({
+@@ -407,28 +409,7 @@ app.post(
+   }
+ );
+ 
+-app.post('/api/avatar/generate-video', async (req, res) => {
+-  const { image } = req.body;
+-
+-  if (typeof image !== 'string' || !image.startsWith('data:image/')) {
+-    return res.status(400).json({
+-      success: false,
+-      message: 'Envie a imagem do avatar no campo image.'
+-    });
+-  }
+-
+-  try {
+-    const result = await generateAvatarVideo(image);
+-    return res.json(result);
+-  } catch (error) {
+-    console.error('Erro ao gerar vídeo com Veo:', error);
+-
+-    return res.status(500).json({
+-      success: false,
+-      message: 'Não foi possível gerar o vídeo do avatar.'
+-    });
+-  }
+-});
++app.use('/api/avatar', createAvatarVideoRouter());
+ 
+ 
+ /*
+@@ -484,7 +465,7 @@ console.log('Diagnóstico da imagem:', {
+ });
+ 
+     const response = await ai.models.generateContent({
+-      model: 'gemini-3.8-flash',
++      model: process.env.GEMINI_CHAT_MODEL || 'gemini-3.8-flash',
+       contents: [
+         {
+           role: 'user',
+@@ -549,4 +530,4 @@ app.listen(
+       `AvaFace Backend rodando em http://localhost:${PORT}`
+     );
+   }
+-);
+\ No newline at end of file
++);
+diff --git a/AvaFace/backend/src/services/geminiAvatarService.ts b/AvaFace/backend/src/services/geminiAvatarService.ts
+index a419ee57de5d30c2bdf9b6fdb915a9bb2b4afe28..56f3951f13bd549f5b90594dc3e78538e1d8f8a4 100644
+--- a/AvaFace/backend/src/services/geminiAvatarService.ts
++++ b/AvaFace/backend/src/services/geminiAvatarService.ts
+@@ -23,26 +23,19 @@ interface AvatarRequest {
+   style: string;
+ }
+ 
+-const apiKey = process.env.GEMINI_API_KEY;
+-
+-if (!apiKey) {
+-  throw new Error(
+-    'GEMINI_API_KEY não foi configurada no arquivo .env'
+-  );
+-}
+-
+-const client = new GoogleGenAI({
+-  apiKey
+-});
+-
+-// Modelo em uso. gemini-2.5-flash-image será desligado em 02/10/2026,
+-// por isso já aponta para o sucessor. Se o 3.1 não estiver disponível
+-// na sua conta/região ainda, troque para 'gemini-2.5-flash-image'.
+-const MODEL_NAME = 'gemini-nano-banana-2.1';
++const MODEL_NAME = process.env.GEMINI_IMAGE_MODEL || 'gemini-nano-banana-2.1';
+ 
+ export async function generateAvatarWithGemini(
+   request: AvatarRequest
+ ) {
++  const apiKey = process.env.GEMINI_API_KEY;
++
++  if (!apiKey) {
++    throw new Error('GEMINI_API_KEY não foi configurada no arquivo .env');
++  }
++
++  const client = new GoogleGenAI({ apiKey });
++
+   const {
+     image,
+     images,
+@@ -160,6 +153,19 @@ Neutral, simple background.
+     'base64'
+   );
+ 
++  // Preserve o tipo real: a imagem também será enviada à API de vídeo.
++  const mimeType = imagePart.inlineData.mimeType;
++  const imageExtensions: Record<string, string> = {
++    'image/png': 'png',
++    'image/jpeg': 'jpg',
++    'image/webp': 'webp'
++  };
++  const extension = imageExtensions[mimeType ?? ''];
++
++  if (!extension || !mimeType) {
++    throw new Error('Gemini retornou um formato de imagem não suportado.');
++  }
++
+   const generatedDir = path.resolve(
+     process.cwd(),
+     'generated'
+@@ -173,7 +179,7 @@ Neutral, simple background.
+   );
+ 
+   const fileName =
+-    `gemini-avatar-${Date.now()}.jpg`;
++    `gemini-avatar-${Date.now()}.${extension}`;
+ 
+   const filePath =
+     path.join(
+@@ -191,7 +197,7 @@ Neutral, simple background.
+   );
+ 
+   const generatedImage =
+-    `data:image/jpeg;base64,${buffer.toString(
++    `data:${mimeType};base64,${buffer.toString(
+       'base64'
+     )}`;
+ 
+@@ -230,4 +236,4 @@ function dataUrlToBase64(
+     mimeType: mimeMatch[1],
+     base64: parts[1]
+   };
+-}
+\ No newline at end of file
++}
+diff --git a/AvaFace/backend/src/services/veovideoservice.ts b/AvaFace/backend/src/services/veovideoservice.ts
+index d6465b551d9a4b31f86c2672058ba61012ab845c..b6193f61e5663454ae48eed46dc4358972521895 100644
+--- a/AvaFace/backend/src/services/veovideoservice.ts
++++ b/AvaFace/backend/src/services/veovideoservice.ts
+@@ -1,133 +1,300 @@
+-
+ import { GoogleGenAI } from '@google/genai';
++import { randomUUID } from 'node:crypto';
++import { createWriteStream } from 'node:fs';
+ import fs from 'node:fs/promises';
+ import path from 'node:path';
++import { Readable, Transform } from 'node:stream';
++import { pipeline } from 'node:stream/promises';
++import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
+ 
+-const apiKey = process.env.GEMINI_API_KEY;
++// The Veo 3.1 preview models were retired on 2026-10-22. Keep this module's
++// existing import path, but use its supported successor via Interactions API.
++const DEFAULT_MODEL = 'gemini-omni-1.1-flash';
++const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
++const PROMPT = `Animate the provided image into a short, natural video.
++Preserve the character's original appearance and identity.
++Use a single continuous shot with no scene cuts.
++The character gently blinks and smiles while looking at the camera.
++The character speaks clearly in Brazilian Portuguese, saying exactly: "Olá!"
++Use a natural Brazilian Portuguese voice.
++Keep the camera fixed and the lighting stable.`;
+ 
+-if (!apiKey) {
+-  throw new Error('GEMINI_API_KEY não configurada no .env');
++export class AvatarVideoError extends Error {
++  constructor(message: string, public readonly statusCode = 500) {
++    super(message);
++    this.name = 'AvatarVideoError';
++  }
+ }
+ 
+-const client = new GoogleGenAI({ apiKey });
++export interface AvatarVideoResult {
++  success: true;
++  provider: 'google-gemini';
++  model: string;
++  videoUrl: string;
++}
+ 
+-const MODEL_NAME = "veo-3.1-lite-generate-preview";
++export function assertVideoConfigured(): void {
++  if (!process.env.GEMINI_API_KEY?.trim()) {
++    throw new AvatarVideoError('A geração de vídeo ainda não foi configurada no servidor.', 503);
++  }
++}
+ 
+-const PROMPT = `
+-Animate the provided image into a natural 4-second video.
+-Preserve the character's original appearance and identity.
+-The character gently blinks and smiles while looking at the camera.
+-The character speaks clearly in Brazilian Portuguese, saying exactly: "Olá!"
+-Use a natural Brazilian Portuguese voice.
+-Keep the camera fixed and the lighting stable.
+-`;
++export function parseAvatarImage(image: unknown) {
++  if (typeof image !== 'string') {
++    throw new AvatarVideoError('Envie a imagem do avatar no campo image.', 400);
++  }
+ 
+-function parseImageDataUrl(dataUrl: string) {
+-  const match = dataUrl.match(
+-    /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/
+-  );
++  if (image.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 100) {
++    throw new AvatarVideoError('A imagem do avatar deve ter no máximo 10 MB.', 413);
++  }
+ 
++  const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(image);
+   if (!match) {
+-    throw new Error(
+-      'Imagem inválida. Envie uma imagem PNG, JPEG ou WebP em base64.'
+-    );
++    throw new AvatarVideoError('Envie uma imagem PNG, JPEG ou WebP em base64.', 400);
+   }
+ 
+-  return {
+-    mimeType: match[1],
+-    imageBytes: Buffer.from(match[2], 'base64')
+-  };
+-}
++  const [, mimeType, imageBytes] = match;
++  const bytes = Buffer.from(imageBytes, 'base64');
++  if (
++    bytes.length === 0 ||
++    bytes.length > MAX_IMAGE_BYTES ||
++    bytes.toString('base64').replace(/=+$/, '') !== imageBytes.replace(/=+$/, '')
++  ) {
++    throw new AvatarVideoError('Os dados da imagem do avatar são inválidos.', 400);
++  }
+ 
+-export async function generateAvatarVideo(image: string) {
+-  const { mimeType, imageBytes } = parseImageDataUrl(image);
+-
+-  const outputDir = path.resolve(process.cwd(), 'generated');
+-  await fs.mkdir(outputDir, { recursive: true });
+-
+-  console.log('Iniciando geração de vídeo com Veo 3.1...');
+-
+-  let operation = await client.models.generateVideos({
+-   model: MODEL_NAME,
+-  prompt: "Animate this image with very subtle natural movement. Keep the original appearance.",
+-  image: {
+-    imageBytes: imageBytes.toString("base64"),
+-    mimeType,
+-  },
+-  config: {
+-    numberOfVideos: 1,
+-    aspectRatio: "9:16",
+-    resolution: "720p",
+-    durationSeconds: 4,
+-  },
+-});
+-
+-  // A geração de vídeo é assíncrona.
+-  // Consultamos o status até o resultado estar pronto.
+-  const maxAttempts = 60;
+-
+-  for (let attempt = 0; !operation.done && attempt < maxAttempts; attempt++) {
+-    await new Promise((resolve) => setTimeout(resolve, 10_000));
+-
+-    operation = await client.operations.getVideosOperation({
+-      operation
+-    });
++  const matchesMime = mimeType === 'image/png'
++    ? bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
++    : mimeType === 'image/jpeg'
++      ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
++      : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP';
+ 
+-    console.log(
+-      `Aguardando vídeo Veo 3.1: tentativa ${attempt + 1}/${maxAttempts}`
+-    );
++  if (!matchesMime) {
++    throw new AvatarVideoError('O conteúdo da imagem não corresponde ao formato informado.', 400);
+   }
+ 
+-  if (!operation.done) {
+-  throw new Error(
+-    'A geração ainda não terminou. Tente novamente mais tarde.'
+-  );
++  return { mimeType, imageBytes: bytes.toString('base64') };
+ }
+ 
+-console.log(
+-  'Status final da operação Veo:',
+-  JSON.stringify(operation, null, 2)
+-);
++export function publicVideoError(error: unknown): AvatarVideoError {
++  if (error instanceof AvatarVideoError) return error;
++
++  const status = error && typeof error === 'object'
++    ? Number('status' in error ? error.status : 'statusCode' in error ? error.statusCode : 'code' in error ? error.code : 0)
++    : 0;
+ 
+-if (operation.error) {
+-  throw new Error(
+-    `Erro retornado pelo Veo: ${JSON.stringify(operation.error)}`
+-  );
++  if (status === 429) {
++    return new AvatarVideoError('O limite de geração de vídeos foi atingido. Tente novamente mais tarde.', 429);
++  }
++  if (status === 401 || status === 403) {
++    return new AvatarVideoError('O servidor não tem acesso à geração de vídeos. Verifique a configuração da API.', 503);
++  }
++  if (error instanceof Error && ['TimeoutError', 'RequestTimeoutError'].includes(error.name)) {
++    return new AvatarVideoError('A geração excedeu o tempo de espera. Tente novamente mais tarde.', 504);
++  }
++  return new AvatarVideoError('Não foi possível gerar o vídeo do avatar. Tente novamente mais tarde.', 502);
+ }
+ 
+-if (
+-  operation.response?.raiMediaFilteredCount ||
+-  operation.response?.raiMediaFilteredReasons?.length
+-) {
+-  throw new Error(
+-    `Vídeo bloqueado pelos filtros de segurança: ${
+-      operation.response.raiMediaFilteredReasons?.join(', ') || 'motivo não informado'
+-    }`
+-  );
++interface VideoOutput {
++  data?: string;
++  uri?: string;
++  mime_type?: string;
+ }
+ 
+-const generatedVideo = operation.response?.generatedVideos?.[0]?.video;
++export interface AvatarVideoClient {
++  createVideo(image: ReturnType<typeof parseAvatarImage>, model: string, timeoutMs: number): Promise<{
++    status: string;
++    output_video?: VideoOutput;
++    errors?: unknown[];
++  }>;
++  getFile(name: string): Promise<{ state?: string }>;
++  downloadVideo(uri: string, filePath: string, timeoutMs: number): Promise<void>;
++}
+ 
+-if (!generatedVideo) {
+-  throw new Error(
+-    'Operação concluída sem vídeo. Verifique o status final impresso no terminal.'
+-  );
++function googleFileName(uri: string): string {
++  const url = new URL(uri);
++  const match = /^\/v1(?:beta)?\/(files\/[A-Za-z0-9_-]+)(?::download)?$/.exec(url.pathname);
++  if (
++    url.origin !== 'https://generativelanguage.googleapis.com' ||
++    url.username || url.password || !match
++  ) {
++    throw new AvatarVideoError('O serviço retornou um endereço de vídeo inválido.', 502);
++  }
++  return match[1];
+ }
+ 
+-  const fileName = `veo-avatar-${Date.now()}.mp4`;
+-  const filePath = path.join(outputDir, fileName);
++/** Stream through pipeline so socket/read/write failures reject the job safely. */
++export async function downloadGoogleVideo(
++  uri: string,
++  filePath: string,
++  apiKey: string,
++  timeoutMs: number,
++  fetchVideo: typeof fetch = fetch
++): Promise<void> {
++  const fileName = googleFileName(uri);
++  let url = new URL(`https://generativelanguage.googleapis.com/v1beta/${fileName}:download?alt=media`);
++  const signal = AbortSignal.timeout(Math.max(1, timeoutMs));
++  let response: Response | undefined;
++
++  for (let redirectCount = 0; redirectCount <= 3; redirectCount++) {
++    response = await fetchVideo(url, {
++      headers: url.origin === 'https://generativelanguage.googleapis.com' ? { 'x-goog-api-key': apiKey } : {},
++      redirect: 'manual',
++      signal
++    });
++    if (![301, 302, 303, 307, 308].includes(response.status)) break;
++    await response.body?.cancel();
++    const location = response.headers.get('location');
++    if (!location || redirectCount === 3) {
++      throw new AvatarVideoError('Não foi possível acessar o arquivo de vídeo gerado.', 502);
++    }
++    url = new URL(location, url);
++    const allowedHost = url.hostname === 'generativelanguage.googleapis.com' ||
++      url.hostname === 'storage.googleapis.com' || url.hostname.endsWith('.googleusercontent.com');
++    if (url.protocol !== 'https:' || url.port || url.username || url.password || !allowedHost) {
++      throw new AvatarVideoError('O serviço retornou um endereço de download inválido.', 502);
++    }
++  }
+ 
+-  await client.files.download({
+-    file: generatedVideo,
+-    downloadPath: filePath
++  if (!response?.ok || !response.body) {
++    await response?.body?.cancel();
++    throw publicVideoError({ status: response?.status });
++  }
++
++  let downloadedBytes = 0;
++  const limit = new Transform({
++    transform(chunk: Buffer, _encoding, callback) {
++      downloadedBytes += chunk.length;
++      if (downloadedBytes > 100 * 1024 * 1024) {
++        callback(new AvatarVideoError('O vídeo gerado excede o tamanho suportado.', 502));
++      } else {
++        callback(null, chunk);
++      }
++    }
+   });
++  try {
++    const source = Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>);
++    await pipeline(source, limit, createWriteStream(filePath), { signal });
++  } catch (error) {
++    if (signal.aborted) throw signal.reason;
++    throw error;
++  }
++}
+ 
+-  console.log(`Vídeo salvo em: ${filePath}`);
++function createGoogleVideoClient(): AvatarVideoClient {
++  assertVideoConfigured();
++  const client = new GoogleGenAI({
++    apiKey: process.env.GEMINI_API_KEY,
++    httpOptions: { timeout: 60_000 }
++  });
+ 
+   return {
+-    success: true,
+-    provider: 'google-veo',
+-    model: MODEL_NAME,
+-    videoUrl: `/generated/${fileName}`
++    createVideo: (image, model, timeoutMs) => client.interactions.create({
++      model,
++      input: [
++        { type: 'image', data: image.imageBytes, mime_type: image.mimeType },
++        { type: 'text', text: PROMPT }
++      ],
++      response_format: { type: 'video', aspect_ratio: '9:16', resolution: '720p', delivery: 'uri' },
++      background: false,
++      store: false,
++      stream: false
++    }, { timeout_ms: timeoutMs, retries: { strategy: 'none' } }),
++    getFile: (name) => client.files.get({ name }),
++    downloadVideo: (uri, downloadPath, timeoutMs) => downloadGoogleVideo(
++      uri, downloadPath, process.env.GEMINI_API_KEY!.trim(), timeoutMs
++    )
+   };
+ }
++
++interface VideoGeneratorOptions {
++  createClient?: () => AvatarVideoClient;
++  outputDir?: string;
++  pollIntervalMs?: number;
++  timeoutMs?: number;
++  sleep?: (ms: number) => Promise<void>;
++  now?: () => number;
++}
++
++/** Keep the provider behind a small injectable boundary for offline tests. */
++export function createAvatarVideoGenerator(options: VideoGeneratorOptions = {}) {
++  const createClient = options.createClient ?? createGoogleVideoClient;
++  const outputDir = options.outputDir ?? path.resolve(process.cwd(), 'generated');
++  const pollIntervalMs = options.pollIntervalMs ?? 5_000;
++  const timeoutMs = options.timeoutMs ?? 10 * 60_000;
++  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
++  const now = options.now ?? Date.now;
++
++  return async function generate(image: string): Promise<AvatarVideoResult> {
++    const parsedImage = parseAvatarImage(image);
++    const model = process.env.VIDEO_MODEL?.trim() || DEFAULT_MODEL;
++    const deadline = now() + timeoutMs;
++    let filePath: string | undefined;
++
++    const assertWithinDeadline = () => {
++      if (now() >= deadline) {
++        throw new AvatarVideoError('A geração excedeu o tempo de espera. Tente novamente mais tarde.', 504);
++      }
++    };
++
++    try {
++      const client = createClient();
++      const interaction = await client.createVideo(parsedImage, model, timeoutMs);
++      assertWithinDeadline();
++
++      if (interaction.status !== 'completed' || interaction.errors?.length) {
++        throw new AvatarVideoError('O Google não concluiu a geração deste vídeo. Tente outro avatar ou tente mais tarde.', 502);
++      }
++
++      const video = interaction.output_video;
++      if (!video || (!video.data && !video.uri)) {
++        throw new AvatarVideoError('O serviço concluiu a geração sem retornar um vídeo. Tente novamente.', 502);
++      }
++      if (video.mime_type && video.mime_type !== 'video/mp4') {
++        throw new AvatarVideoError('O serviço retornou um formato de vídeo não suportado.', 502);
++      }
++
++      await fs.mkdir(outputDir, { recursive: true });
++      const fileName = `avatar-video-${randomUUID()}.mp4`;
++      filePath = path.join(outputDir, fileName);
++
++      if (video.data) {
++        const bytes = Buffer.from(video.data, 'base64');
++        if (!bytes.length) throw new AvatarVideoError('O serviço retornou um vídeo vazio.', 502);
++        await fs.writeFile(filePath, bytes);
++      } else {
++        // Only accept the provider's Files API URI; never forward credentials to
++        // an arbitrary host. The file can still be PROCESSING after creation.
++        const fileName = googleFileName(video.uri!);
++        let file = await client.getFile(fileName);
++        while (file.state !== 'ACTIVE') {
++          if (file.state !== 'PROCESSING') {
++            throw new AvatarVideoError('O serviço não conseguiu preparar o arquivo de vídeo. Tente novamente.', 502);
++          }
++          if (now() + pollIntervalMs >= deadline) {
++            throw new AvatarVideoError('A geração excedeu o tempo de espera. Tente novamente mais tarde.', 504);
++          }
++          await sleep(pollIntervalMs);
++          assertWithinDeadline();
++          file = await client.getFile(fileName);
++        }
++
++        assertWithinDeadline();
++        await client.downloadVideo(video.uri!, filePath, Math.max(1, deadline - now()));
++      }
++
++      assertWithinDeadline();
++      const savedVideo = await fs.stat(filePath);
++      if (savedVideo.size === 0) {
++        throw new AvatarVideoError('Não foi possível salvar o vídeo gerado. Tente novamente.', 502);
++      }
++
++      return { success: true, provider: 'google-gemini', model, videoUrl: `/generated/${fileName}` };
++    } catch (error) {
++      if (filePath) await fs.rm(filePath, { force: true }).catch(() => undefined);
++      throw publicVideoError(error);
++    }
++  };
++}
++
++export const generateAvatarVideo = createAvatarVideoGenerator();
+diff --git a/AvaFace/backend/tests/avatarVideo.test.ts b/AvaFace/backend/tests/avatarVideo.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..185b0eabca42f9d12eea9205e65fa35f1912a6ea
+--- /dev/null
++++ b/AvaFace/backend/tests/avatarVideo.test.ts
+@@ -0,0 +1,126 @@
++import assert from 'node:assert/strict';
++import { once } from 'node:events';
++import { createServer } from 'node:http';
++import { randomUUID } from 'node:crypto';
++import test, { type TestContext } from 'node:test';
++import express from 'express';
++import { createAvatarVideoRouter } from '../src/routes/avatarVideo.js';
++import { AvatarVideoError, type AvatarVideoResult } from '../src/services/veovideoservice.js';
++
++const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/52EAAAAASUVORK5CYII=';
++const RESULT: AvatarVideoResult = {
++  success: true,
++  provider: 'google-gemini',
++  model: 'test-model',
++  videoUrl: '/generated/test.mp4'
++};
++
++async function serve(t: TestContext, options: Parameters<typeof createAvatarVideoRouter>[0] = {}) {
++  const app = express();
++  app.use(express.json({ limit: '15mb' }));
++  app.use('/api/avatar', createAvatarVideoRouter({
++    assertConfigured: () => {},
++    generate: async () => RESULT,
++    ...options
++  }));
++  const server = createServer(app);
++  server.listen(0, '127.0.0.1');
++  await once(server, 'listening');
++  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
++  const address = server.address();
++  assert.ok(address && typeof address !== 'string');
++  const base = `http://127.0.0.1:${address.port}/api/avatar`;
++  return {
++    post: (body: unknown) => fetch(`${base}/generate-video`, {
++      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
++    }),
++    get: (id: string) => fetch(`${base}/video-jobs/${id}`)
++  };
++}
++
++test('returns a job immediately, tracks processing and exposes the completed video', async (t) => {
++  let complete!: (result: AvatarVideoResult) => void;
++  const api = await serve(t, { generate: () => new Promise((resolve) => { complete = resolve; }) });
++  const response = await api.post({ image: IMAGE });
++  assert.equal(response.status, 202);
++  const job = await response.json();
++  assert.equal(job.status, 'processing');
++  assert.equal((await (await api.get(job.jobId)).json()).status, 'processing');
++  complete(RESULT);
++  const completed = await (await api.get(job.jobId)).json();
++  assert.equal(completed.status, 'completed');
++  assert.equal(completed.videoUrl, RESULT.videoUrl);
++  assert.equal(completed.imageHash, undefined);
++});
++
++test('validates image and request id before invoking the provider', async (t) => {
++  let calls = 0;
++  const api = await serve(t, { generate: async () => { calls++; return RESULT; } });
++  for (const body of [{}, { image: 123 }, { image: 'data:image/png;base64,YWJj' }, { image: IMAGE, requestId: 'invalid' }]) {
++    assert.equal((await api.post(body)).status, 400);
++  }
++  assert.equal(calls, 0);
++});
++
++test('checks configuration before accepting a job', async (t) => {
++  const api = await serve(t, { assertConfigured: () => { throw new AvatarVideoError('Vídeo indisponível.', 503); } });
++  assert.equal((await api.post({ image: IMAGE })).status, 503);
++});
++
++test('caps active jobs and does not start extra provider work', async (t) => {
++  let calls = 0;
++  const api = await serve(t, { maxConcurrent: 1, generate: () => { calls++; return new Promise(() => {}); } });
++  assert.equal((await api.post({ image: IMAGE })).status, 202);
++  const limited = await api.post({ image: IMAGE });
++  assert.equal(limited.status, 429);
++  assert.equal(limited.headers.get('retry-after'), '30');
++  assert.equal(calls, 1);
++});
++
++test('reuses the same request id without regenerating and rejects conflicting images', async (t) => {
++  let calls = 0;
++  let complete!: (result: AvatarVideoResult) => void;
++  const api = await serve(t, { maxConcurrent: 1, generate: () => { calls++; return new Promise((resolve) => { complete = resolve; }); } });
++  const requestId = randomUUID();
++  const first = await (await api.post({ image: IMAGE, requestId })).json();
++  const retry = await api.post({ image: IMAGE, requestId });
++  assert.equal(retry.status, 202);
++  assert.equal((await retry.json()).jobId, first.jobId);
++  const changedImage = 'data:image/jpeg;base64,/9j/2Q==';
++  assert.equal((await api.post({ image: changedImage, requestId })).status, 409);
++  complete(RESULT);
++  const completed = await api.post({ image: IMAGE, requestId });
++  assert.equal(completed.status, 200);
++  assert.equal((await completed.json()).videoUrl, RESULT.videoUrl);
++  assert.equal(calls, 1);
++});
++
++test('returns a sanitized failed job without leaking provider details', async (t) => {
++  const api = await serve(t, { generate: async () => { throw new Error('secret-key=DO-NOT-LEAK'); } });
++  const job = await (await api.post({ image: IMAGE })).json();
++  const failure = await (await api.get(job.jobId)).json();
++  assert.equal(failure.status, 'failed');
++  assert.match(failure.message, /Não foi possível/);
++  assert.ok(!JSON.stringify(failure).includes('DO-NOT-LEAK'));
++});
++
++test('expires completed jobs and releases their idempotency keys', async (t) => {
++  let now = 0;
++  let calls = 0;
++  const api = await serve(t, { maxJobs: 1, jobTtlMs: 100, now: () => now, generate: async () => { calls++; return RESULT; } });
++  const requestId = randomUUID();
++  const first = await (await api.post({ image: IMAGE, requestId })).json();
++  assert.equal((await api.post({ image: IMAGE })).status, 429);
++  now = 101;
++  assert.equal((await api.get(first.jobId)).status, 404);
++  assert.equal((await api.post({ image: IMAGE, requestId })).status, 202);
++  assert.equal(calls, 2);
++});
++
++test('unknown jobs return JSON 404 and are never cached', async (t) => {
++  const api = await serve(t);
++  const response = await api.get(randomUUID());
++  assert.equal(response.status, 404);
++  assert.equal(response.headers.get('cache-control'), 'no-store');
++  assert.equal((await response.json()).success, false);
++});
+diff --git a/AvaFace/backend/tests/veovideoservice.test.ts b/AvaFace/backend/tests/veovideoservice.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a551de105d614904801e6156dcf2e18424d5403b
+--- /dev/null
++++ b/AvaFace/backend/tests/veovideoservice.test.ts
+@@ -0,0 +1,170 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import test, { type TestContext } from 'node:test';
++import {
++  assertVideoConfigured,
++  AvatarVideoError,
++  createAvatarVideoGenerator,
++  downloadGoogleVideo,
++  parseAvatarImage,
++  publicVideoError,
++  type AvatarVideoClient
++} from '../src/services/veovideoservice.js';
++
++const IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/52EAAAAASUVORK5CYII=';
++const VIDEO_BYTES = Buffer.from('offline-test-video');
++const URI = 'https://generativelanguage.googleapis.com/v1beta/files/test_video';
++
++async function setup(t: TestContext, overrides: Partial<AvatarVideoClient> = {}, options: Parameters<typeof createAvatarVideoGenerator>[0] = {}) {
++  const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'avaface-video-test-'));
++  t.after(() => fs.rm(outputDir, { recursive: true, force: true }));
++  const client: AvatarVideoClient = {
++    createVideo: async () => ({ status: 'completed', output_video: { uri: URI, mime_type: 'video/mp4' } }),
++    getFile: async () => ({ state: 'ACTIVE' }),
++    downloadVideo: async (_uri, filePath) => fs.writeFile(filePath, VIDEO_BYTES),
++    ...overrides
++  };
++  return {
++    generate: createAvatarVideoGenerator({ outputDir, createClient: () => client, ...options }),
++    outputDir
++  };
++}
++
++test('validates base64, MIME and file signatures before sending an image', () => {
++  assert.equal(parseAvatarImage(IMAGE).mimeType, 'image/png');
++  assert.throws(() => parseAvatarImage(IMAGE.replace('image/png', 'image/jpeg')), /formato informado/);
++  assert.throws(() => parseAvatarImage('data:image/png;base64,%%%'), AvatarVideoError);
++  assert.throws(() => parseAvatarImage('data:image/svg+xml;base64,PHN2Zz4='), AvatarVideoError);
++  assert.throws(() => parseAvatarImage({ image: IMAGE }), AvatarVideoError);
++  assert.throws(() => parseAvatarImage(`data:image/png;base64,${'A'.repeat(14 * 1024 * 1024)}`), (error) => error instanceof AvatarVideoError && error.statusCode === 413);
++});
++
++test('missing credentials are reported lazily instead of crashing imports', () => {
++  const key = process.env.GEMINI_API_KEY;
++  delete process.env.GEMINI_API_KEY;
++  try {
++    assert.throws(assertVideoConfigured, (error) => error instanceof AvatarVideoError && error.statusCode === 503);
++  } finally {
++    if (key !== undefined) process.env.GEMINI_API_KEY = key;
++  }
++});
++
++test('polls the returned file until ACTIVE then downloads a local MP4', async (t) => {
++  let polls = 0;
++  let sleeps = 0;
++  const { generate, outputDir } = await setup(t, {
++    createVideo: async (image, model, timeoutMs) => {
++      assert.equal(image.mimeType, 'image/png');
++      assert.equal(image.imageBytes, IMAGE.split(',')[1]);
++      assert.ok(model.length > 0);
++      assert.equal(timeoutMs, 600_000);
++      return { status: 'completed', output_video: { uri: URI, mime_type: 'video/mp4' } };
++    },
++    getFile: async (name) => {
++      assert.equal(name, 'files/test_video');
++      return { state: ++polls === 1 ? 'PROCESSING' : 'ACTIVE' };
++    }
++  }, { sleep: async () => { sleeps++; } });
++  const result = await generate(IMAGE);
++  assert.equal(result.success, true);
++  assert.match(result.videoUrl, /^\/generated\/avatar-video-[\da-f-]+\.mp4$/);
++  assert.deepEqual(await fs.readFile(path.join(outputDir, path.basename(result.videoUrl))), VIDEO_BYTES);
++  assert.equal(polls, 2);
++  assert.equal(sleeps, 1);
++});
++
++test('supports inline video output and unique filenames', async (t) => {
++  const { generate, outputDir } = await setup(t, {
++    createVideo: async () => ({ status: 'completed', output_video: { data: VIDEO_BYTES.toString('base64'), mime_type: 'video/mp4' } }),
++    getFile: async () => { throw new Error('should not poll an inline video'); },
++    downloadVideo: async () => { throw new Error('should not download an inline video'); }
++  });
++  const first = await generate(IMAGE);
++  const second = await generate(IMAGE);
++  assert.notEqual(first.videoUrl, second.videoUrl);
++  assert.equal((await fs.readdir(outputDir)).length, 2);
++});
++
++test('rejects failed interactions, missing output, unsupported MIME and untrusted URIs', async (t) => {
++  const responses = [
++    { status: 'failed' },
++    { status: 'completed' },
++    { status: 'completed', output_video: { data: 'YQ==', mime_type: 'video/webm' } },
++    { status: 'completed', output_video: { uri: 'https://example.org/video.mp4' } }
++  ];
++  for (const response of responses) {
++    const { generate, outputDir } = await setup(t, { createVideo: async () => response });
++    await assert.rejects(generate(IMAGE), AvatarVideoError);
++    assert.deepEqual(await fs.readdir(outputDir), []);
++  }
++});
++
++test('stops polling after its deadline and when Google marks the file FAILED', async (t) => {
++  let now = 0;
++  const timed = await setup(t, { getFile: async () => ({ state: 'PROCESSING' }) }, {
++    timeoutMs: 11,
++    pollIntervalMs: 5,
++    now: () => now,
++    sleep: async (ms) => { now += ms; }
++  });
++  await assert.rejects(timed.generate(IMAGE), (error) => error instanceof AvatarVideoError && error.statusCode === 504);
++  const failed = await setup(t, { getFile: async () => ({ state: 'FAILED' }) });
++  await assert.rejects(failed.generate(IMAGE), /preparar o arquivo/);
++});
++
++test('removes partial downloads and never exposes provider credentials in errors', async (t) => {
++  const { generate, outputDir } = await setup(t, {
++    downloadVideo: async (_uri, filePath) => {
++      await fs.writeFile(filePath, 'partial file');
++      throw new Error('secret-key=DO-NOT-LEAK');
++    }
++  });
++  await assert.rejects(generate(IMAGE), (error) => error instanceof AvatarVideoError && !error.message.includes('DO-NOT-LEAK'));
++  assert.deepEqual(await fs.readdir(outputDir), []);
++});
++
++test('maps quota and access failures to actionable safe messages', () => {
++  assert.equal(publicVideoError({ status: 429 }).statusCode, 429);
++  assert.equal(publicVideoError({ statusCode: 403 }).statusCode, 503);
++  assert.equal(publicVideoError({ code: 401 }).statusCode, 503);
++  assert.ok(!publicVideoError(new Error('secret')).message.includes('secret'));
++});
++
++test('stream read failure rejects the job and removes the partial download without crashing', async (t) => {
++  const failingFetch: typeof fetch = async () => new Response(new ReadableStream({
++    start(controller) {
++      controller.enqueue(VIDEO_BYTES);
++    },
++    pull(controller) {
++      controller.error(new Error('connection interrupted'));
++    }
++  }));
++  const { generate, outputDir } = await setup(t, {
++    downloadVideo: (uri, filePath, timeoutMs) => downloadGoogleVideo(uri, filePath, 'test-key', timeoutMs, failingFetch)
++  });
++  await assert.rejects(generate(IMAGE), AvatarVideoError);
++  assert.deepEqual(await fs.readdir(outputDir), []);
++});
++
++test('download follows a Google storage redirect without forwarding the API key', async (t) => {
++  let calls = 0;
++  const redirectFetch: typeof fetch = async (input, init) => {
++    calls++;
++    const headers = new Headers(init?.headers);
++    if (calls === 1) {
++      assert.equal(String(input), 'https://generativelanguage.googleapis.com/v1beta/files/test_video:download?alt=media');
++      assert.equal(headers.get('x-goog-api-key'), 'test-key');
++      return new Response(null, { status: 302, headers: { location: 'https://storage.googleapis.com/test-bucket/signed-video.mp4' } });
++    }
++    assert.equal(headers.has('x-goog-api-key'), false);
++    return new Response(VIDEO_BYTES);
++  };
++  const { generate, outputDir } = await setup(t, {
++    downloadVideo: (uri, filePath, timeoutMs) => downloadGoogleVideo(uri, filePath, 'test-key', timeoutMs, redirectFetch)
++  });
++  const result = await generate(IMAGE);
++  assert.equal(calls, 2);
++  assert.deepEqual(await fs.readFile(path.join(outputDir, path.basename(result.videoUrl))), VIDEO_BYTES);
++});
+diff --git a/AvaFace/package.json b/AvaFace/package.json
+index ee4d5df2e5e0c5dc9f1fc44b4da87edb0b876564..8931ad778edadd43bd13a5933cc00297a0ffa30f 100644
+--- a/AvaFace/package.json
++++ b/AvaFace/package.json
+@@ -6,6 +6,7 @@
+   "scripts": {
+     "dev": "vite",
+     "build": "tsc -b && vite build",
++    "test": "node --experimental-strip-types tests/avatarVideo.test.ts",
+     "lint": "eslint .",
+     "preview": "vite preview"
+   },
+diff --git a/AvaFace/src/components/AvatarVideo.css b/AvaFace/src/components/AvatarVideo.css
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c308f1092310d9658a15d048a9f14b39320e628
+--- /dev/null
++++ b/AvaFace/src/components/AvatarVideo.css
+@@ -0,0 +1,100 @@
++.avatar-video-section {
++  margin: 24px 0;
++  padding: 22px;
++  border: 1px solid var(--border);
++  border-radius: var(--radius-md);
++  background: var(--surface);
++}
++
++.avatar-video-heading {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  color: #c4b5fd;
++}
++
++.avatar-video-heading h4 {
++  margin: 0;
++  color: var(--text);
++  font-size: 18px;
++}
++
++.avatar-video-description,
++.avatar-video-status,
++.avatar-video-error {
++  font-size: 14px;
++  line-height: 1.6;
++  color: var(--text-muted);
++}
++
++.avatar-video-generate {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 9px;
++  min-height: 44px;
++  padding: 12px 20px;
++  border: 1px solid #8b5cf6;
++  border-radius: 12px;
++  color: white;
++  background: #6d28d9;
++  font-weight: 600;
++  cursor: pointer;
++}
++
++.avatar-video-generate:hover:not(:disabled) {
++  background: #7c3aed;
++}
++
++.avatar-video-generate:disabled {
++  opacity: 0.7;
++  cursor: wait;
++}
++
++.avatar-video-generate:focus-visible,
++.avatar-video-link:focus-visible {
++  outline: 3px solid var(--brand-c);
++  outline-offset: 4px;
++}
++
++.avatar-video-error {
++  color: #fca5a5;
++  overflow-wrap: anywhere;
++}
++
++.avatar-video-result {
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  gap: 14px;
++}
++
++.generated-avatar-video {
++  display: block;
++  width: min(100%, 360px);
++  max-height: 70vh;
++  border-radius: 14px;
++  background: #000;
++}
++
++.avatar-video-link {
++  color: #c4b5fd;
++  text-underline-offset: 4px;
++}
++
++.avatar-video-spinner {
++  animation: avatar-video-spin 1s linear infinite;
++}
++
++@keyframes avatar-video-spin {
++  to { transform: rotate(360deg); }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .avatar-video-spinner { animation: none; }
++}
++
++@media (max-width: 600px) {
++  .avatar-video-section { padding: 16px; }
++  .avatar-video-generate { width: 100%; }
++}
+diff --git a/AvaFace/src/components/AvatarVideo.tsx b/AvaFace/src/components/AvatarVideo.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..0ee95767f945fcf760fa924cd05ba1d7605602b7
+--- /dev/null
++++ b/AvaFace/src/components/AvatarVideo.tsx
+@@ -0,0 +1,165 @@
++import { useEffect, useRef, useState } from 'react';
++import { Film, LoaderCircle, RotateCcw } from 'lucide-react';
++import { avatarVideoUrl } from '../services/api.ts';
++import {
++  generateAvatarVideo,
++  waitForAvatarVideo,
++  VideoApiError,
++  VideoPollingTimeout,
++} from '../services/avatarVideo.ts';
++import './AvatarVideo.css';
++
++interface AvatarVideoProps {
++  image: string;
++}
++
++type VideoState = 'idle' | 'submitting' | 'processing' | 'paused' | 'failed' | 'completed';
++
++/** Mount once per generated avatar; the parent remounts it when a scan changes. */
++export default function AvatarVideo({ image }: AvatarVideoProps) {
++  const [state, setState] = useState<VideoState>('idle');
++  const [message, setMessage] = useState('');
++  const [videoUrl, setVideoUrl] = useState('');
++  const [playbackError, setPlaybackError] = useState(false);
++  const requestRef = useRef<AbortController | null>(null);
++  const jobIdRef = useRef<string | null>(null);
++  const requestIdRef = useRef<string | null>(null);
++
++  useEffect(() => () => {
++    requestRef.current?.abort();
++    requestRef.current = null;
++  }, []);
++
++  const handleGenerateVideo = async () => {
++    // A ref locks synchronously, including two clicks before React renders again.
++    if (requestRef.current) return;
++    const controller = new AbortController();
++    requestRef.current = controller;
++    setMessage('');
++    setPlaybackError(false);
++
++    try {
++      let job;
++      if (!jobIdRef.current) {
++        setState('submitting');
++        requestIdRef.current ??= crypto.randomUUID();
++        job = await generateAvatarVideo(image, requestIdRef.current, controller.signal);
++        controller.signal.throwIfAborted();
++        jobIdRef.current = job.jobId;
++      }
++
++      if (!job || job.status === 'processing') {
++        setState('processing');
++        job = await waitForAvatarVideo(jobIdRef.current!, controller.signal);
++      }
++      controller.signal.throwIfAborted();
++
++      if (job.status === 'failed') {
++        setState('failed');
++        setMessage(job.message || 'Não foi possível gerar o vídeo. Tente novamente.');
++        jobIdRef.current = null;
++        requestIdRef.current = null;
++        return;
++      }
++
++      setVideoUrl(avatarVideoUrl(job.videoUrl!));
++      setState('completed');
++    } catch (error) {
++      if (controller.signal.aborted) return;
++
++      const rejectedRequest = error instanceof VideoApiError && (
++        jobIdRef.current
++          ? [404, 410].includes(error.status)
++          : [400, 404, 409, 410, 413, 422, 429, 503].includes(error.status)
++      );
++      if (rejectedRequest) {
++        setState('failed');
++        setMessage(error.message);
++        // These responses explicitly rejected the request (or the job expired).
++        jobIdRef.current = null;
++        requestIdRef.current = null;
++      } else {
++        setState('paused');
++        setMessage(error instanceof VideoPollingTimeout
++          ? error.message
++          : jobIdRef.current
++            ? 'A consulta foi interrompida. Você pode retomar o acompanhamento do mesmo vídeo.'
++            : 'Não foi possível confirmar o envio. Tente reconectar para consultar a mesma solicitação.');
++      }
++    } finally {
++      if (requestRef.current === controller) requestRef.current = null;
++    }
++  };
++
++  const isBusy = state === 'submitting' || state === 'processing';
++  const buttonText = state === 'paused'
++    ? 'Retomar acompanhamento'
++    : state === 'failed'
++      ? 'Tentar gerar novamente'
++      : state === 'submitting'
++        ? 'Enviando avatar...'
++        : state === 'processing'
++          ? 'Gerando vídeo...'
++          : 'Gerar vídeo';
++
++  return (
++    <section className="avatar-video-section" aria-label="Vídeo do avatar" aria-busy={isBusy}>
++      <div className="avatar-video-heading">
++        <Film size={22} aria-hidden="true" />
++        <h4>Dê movimento ao seu avatar</h4>
++      </div>
++
++      {state !== 'completed' && (
++        <>
++          <p className="avatar-video-description">
++            Gere um vídeo a partir do avatar que você acabou de criar. A geração pode levar alguns minutos.
++          </p>
++          <button
++            type="button"
++            className="avatar-video-generate"
++            onClick={handleGenerateVideo}
++            disabled={isBusy}
++          >
++            {isBusy
++              ? <LoaderCircle className="avatar-video-spinner" size={18} aria-hidden="true" />
++              : state === 'paused' || state === 'failed'
++                ? <RotateCcw size={18} aria-hidden="true" />
++                : <Film size={18} aria-hidden="true" />}
++            {buttonText}
++          </button>
++        </>
++      )}
++
++      <div className="avatar-video-status" role="status" aria-live="polite">
++        {isBusy && <p>Estamos preparando seu vídeo. Mantenha esta página aberta para acompanhar.</p>}
++        {message && <p className="avatar-video-error">{message}</p>}
++        {state === 'completed' && <p>Seu vídeo está pronto!</p>}
++      </div>
++
++      {state === 'completed' && videoUrl && (
++        <div className="avatar-video-result">
++          <video
++            className="generated-avatar-video"
++            src={videoUrl}
++            poster={image}
++            controls
++            playsInline
++            preload="metadata"
++            onError={() => setPlaybackError(true)}
++            aria-label="Vídeo gerado a partir do seu avatar"
++          >
++            Seu navegador não suporta a reprodução de vídeo.
++          </video>
++          {playbackError && (
++            <p className="avatar-video-error" role="alert">
++              Não foi possível carregar o player. Tente abrir o vídeo pelo link abaixo.
++            </p>
++          )}
++          <a className="avatar-video-link" href={videoUrl} target="_blank" rel="noopener noreferrer">
++            Abrir vídeo em outra aba
++          </a>
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/AvaFace/src/components/FaceRecognition.tsx b/AvaFace/src/components/FaceRecognition.tsx
+index e4c3261d6ae785724428e65ef010dcbb74395272..e05acd37aca27a804ac23d523cfc6850999f8396 100644
+--- a/AvaFace/src/components/FaceRecognition.tsx
++++ b/AvaFace/src/components/FaceRecognition.tsx
+@@ -35,6 +35,8 @@ import {
+ } from '../services/FaceAnalyzer.ts';
+ 
+ import './FaceRecognition.css';
++import AvatarVideo from './AvatarVideo.tsx';
++import { apiUrl } from '../services/api.ts';
+ import type {
+   AvatarRequest,
+   AvatarImages
+@@ -46,7 +48,7 @@ import type {
+ */
+ 
+ const AVATAR_API_URL =
+-  'http://localhost:3000/api/avatar/generate-gemini';
++  apiUrl('/api/avatar/generate-gemini');
+ 
+ /*
+   Quantos frames seguidos a pose precisa
+@@ -707,7 +709,7 @@ const generateRandomQuestions = () => {
+ 
+   try {
+     const response = await fetch(
+-      'http://localhost:3000/api/avatar/chat',
++      apiUrl('/api/avatar/chat'),
+       {
+         method: 'POST',
+         headers: {
+@@ -1291,6 +1293,9 @@ const generateRandomQuestions = () => {
+ 
+       setFaceScan(null);
+ 
++      setGeneratedAvatar(null);
++      setIsAvatarFullscreen(false);
++
+       capturedRef.current = {};
+ 
+       frontLandmarksRef.current = [];
+@@ -1328,6 +1333,9 @@ const generateRandomQuestions = () => {
+ 
+       setFaceScan(null);
+ 
++      setGeneratedAvatar(null);
++      setIsAvatarFullscreen(false);
++
+       setError('');
+ 
+     };
+@@ -1953,6 +1961,10 @@ const generateRandomQuestions = () => {
+             </div>
+ 
+ 
++            {generatedAvatar && (
++              <AvatarVideo key={faceScan.timestamp} image={generatedAvatar} />
++            )}
++
+             <button
+               onClick={resetScan}
+ 
+@@ -2050,4 +2062,4 @@ const generateRandomQuestions = () => {
+ 
+ };
+ 
+-export default FaceRecognition;
+\ No newline at end of file
++export default FaceRecognition;
+diff --git a/AvaFace/src/services/api.ts b/AvaFace/src/services/api.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a818de668a0358b9d514c0a87097ab4900b5eb2
+--- /dev/null
++++ b/AvaFace/src/services/api.ts
+@@ -0,0 +1,19 @@
++const configuredBaseUrl = import.meta.env?.VITE_API_BASE_URL?.trim() ?? '';
++
++/** API and generated media share the backend origin, including on GitHub Pages. */
++export function apiUrl(path: string, baseUrl = configuredBaseUrl): string {
++  if (!path.startsWith('/') || path.startsWith('//')) {
++    throw new Error('O caminho da API deve começar com uma única barra.');
++  }
++
++  return `${baseUrl.replace(/\/+$/, '')}${path}`;
++}
++
++export function avatarVideoUrl(path: string, baseUrl = configuredBaseUrl): string {
++  // The backend returns a local generated file, never a provider URL or API key.
++  if (!/^\/generated\/[a-zA-Z0-9._-]+\.mp4$/.test(path)) {
++    throw new Error('A API retornou um endereço de vídeo inválido.');
++  }
++
++  return apiUrl(path, baseUrl);
++}
+diff --git a/AvaFace/src/services/avatarVideo.ts b/AvaFace/src/services/avatarVideo.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..04b0c1bd1e624df2f43391b7b3efd764b4dba733
+--- /dev/null
++++ b/AvaFace/src/services/avatarVideo.ts
+@@ -0,0 +1,111 @@
++import { apiUrl } from './api.ts';
++
++export interface AvatarVideoJob {
++  success: true;
++  jobId: string;
++  status: 'processing' | 'completed' | 'failed';
++  videoUrl?: string;
++  message?: string;
++}
++
++export class VideoApiError extends Error {
++  status: number;
++
++  constructor(message: string, status: number) {
++    super(message);
++    this.name = 'VideoApiError';
++    this.status = status;
++  }
++}
++
++export class VideoPollingTimeout extends Error {
++  constructor() {
++    super('O vídeo ainda está sendo processado. Consulte o andamento novamente em instantes.');
++    this.name = 'VideoPollingTimeout';
++  }
++}
++
++async function requestVideoJob(
++  path: string,
++  init: RequestInit,
++  signal: AbortSignal,
++): Promise<AvatarVideoJob> {
++  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
++  const response = await fetch(apiUrl(path), { ...init, signal: requestSignal });
++  const data: unknown = await response.json().catch(() => null);
++  const body = data && typeof data === 'object' ? data as Record<string, unknown> : null;
++
++  if (!response.ok || body?.success !== true) {
++    const message = typeof body?.message === 'string'
++      ? body.message
++      : 'Não foi possível consultar o serviço de vídeo. Verifique a conexão com o servidor.';
++    throw new VideoApiError(message, response.status);
++  }
++
++  if (
++    typeof body.jobId !== 'string' || !body.jobId ||
++    !['processing', 'completed', 'failed'].includes(String(body.status)) ||
++    (body.status === 'completed' && typeof body.videoUrl !== 'string')
++  ) {
++    throw new Error('O serviço de vídeo retornou uma resposta inválida.');
++  }
++
++  return body as unknown as AvatarVideoJob;
++}
++
++/** Starts one job; retries must reuse requestId to avoid generating twice. */
++export function generateAvatarVideo(
++  image: string,
++  requestId: string,
++  signal: AbortSignal,
++): Promise<AvatarVideoJob> {
++  return requestVideoJob('/api/avatar/generate-video', {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify({ image, requestId }),
++  }, signal);
++}
++
++export function getAvatarVideoJob(jobId: string, signal: AbortSignal): Promise<AvatarVideoJob> {
++  return requestVideoJob(`/api/avatar/video-jobs/${encodeURIComponent(jobId)}`, {}, signal);
++}
++
++function waitForPoll(milliseconds: number, signal: AbortSignal): Promise<void> {
++  return new Promise((resolve, reject) => {
++    signal.throwIfAborted();
++
++    const abort = () => {
++      clearTimeout(timer);
++      reject(signal.reason);
++    };
++    const timer = setTimeout(() => {
++      signal.removeEventListener('abort', abort);
++      resolve();
++    }, milliseconds);
++
++    signal.addEventListener('abort', abort, { once: true });
++  });
++}
++
++/** Only GETs here: resuming a connection cannot create another paid generation. */
++export async function waitForAvatarVideo(
++  jobId: string,
++  signal: AbortSignal,
++  options: { intervalMs?: number; timeoutMs?: number } = {},
++): Promise<AvatarVideoJob> {
++  const deadline = Date.now() + (options.timeoutMs ?? 15 * 60_000);
++
++  while (Date.now() < deadline) {
++    signal.throwIfAborted();
++    const job = await getAvatarVideoJob(jobId, signal);
++
++    if (job.jobId !== jobId) {
++      throw new Error('O serviço retornou um vídeo diferente do solicitado.');
++    }
++    if (job.status !== 'processing') return job;
++
++    await waitForPoll(Math.min(options.intervalMs ?? 5_000, Math.max(0, deadline - Date.now())), signal);
++  }
++
++  throw new VideoPollingTimeout();
++}
+diff --git a/AvaFace/tests/avatarVideo.test.ts b/AvaFace/tests/avatarVideo.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dbdf79897cf9dac8239d9c253732c585effea5b9
+--- /dev/null
++++ b/AvaFace/tests/avatarVideo.test.ts
+@@ -0,0 +1,121 @@
++import assert from 'node:assert/strict';
++import { afterEach, mock, test } from 'node:test';
++import { apiUrl, avatarVideoUrl } from '../src/services/api.ts';
++import {
++  generateAvatarVideo,
++  getAvatarVideoJob,
++  VideoApiError,
++  VideoPollingTimeout,
++  waitForAvatarVideo,
++} from '../src/services/avatarVideo.ts';
++
++afterEach(() => mock.restoreAll());
++
++const processingJob = { success: true, jobId: 'job-123', status: 'processing' };
++const completedJob = { ...processingJob, status: 'completed', videoUrl: '/generated/avatar-123.mp4' };
++
++test('API and media URLs use the configured backend instead of the Pages origin', () => {
++  assert.equal(apiUrl('/api/avatar/generate-video', 'https://api.example.com/'), 'https://api.example.com/api/avatar/generate-video');
++  assert.equal(apiUrl('/api/avatar/chat', ''), '/api/avatar/chat');
++  assert.equal(avatarVideoUrl('/generated/avatar-123.mp4', 'https://api.example.com'), 'https://api.example.com/generated/avatar-123.mp4');
++  assert.equal(avatarVideoUrl('/generated/avatar-123.mp4', '/backend/'), '/backend/generated/avatar-123.mp4');
++  assert.throws(() => avatarVideoUrl('//untrusted.example/video.mp4'));
++  assert.throws(() => avatarVideoUrl('/generated/../../private.mp4'));
++  assert.throws(() => avatarVideoUrl('javascript:alert(1)'));
++});
++
++test('generateAvatarVideo sends the generated image and stable idempotency ID', async () => {
++  const calls: { url: unknown; init: RequestInit }[] = [];
++  mock.method(globalThis, 'fetch', async (url: unknown, init: RequestInit) => {
++    calls.push({ url, init });
++    return Response.json(processingJob, { status: 202 });
++  });
++
++  const signal = new AbortController().signal;
++  const image = 'data:image/png;base64,dGVzdA==';
++  const result = await generateAvatarVideo(image, 'request-123', signal);
++  assert.equal(result.jobId, 'job-123');
++  assert.equal(calls.length, 1);
++  assert.equal(calls[0].url, '/api/avatar/generate-video');
++  assert.equal(calls[0].init.method, 'POST');
++  assert.deepEqual(JSON.parse(calls[0].init.body as string), { image, requestId: 'request-123' });
++});
++
++test('polling retrieves the same job until completed and never submits a generation', async () => {
++  const calls: { url: unknown; method?: string }[] = [];
++  mock.method(globalThis, 'fetch', async (url: unknown, init: RequestInit) => {
++    calls.push({ url, method: init.method });
++    return Response.json(calls.length === 1 ? processingJob : completedJob);
++  });
++
++  const result = await waitForAvatarVideo('job-123', new AbortController().signal, { intervalMs: 1 });
++  assert.equal(result.videoUrl, '/generated/avatar-123.mp4');
++  assert.equal(calls.length, 2);
++  assert(calls.every(call => call.url === '/api/avatar/video-jobs/job-123' && call.method !== 'POST'));
++});
++
++test('a failed job finishes polling with the provider-safe message', async () => {
++  mock.method(globalThis, 'fetch', async () => Response.json({
++    ...processingJob,
++    status: 'failed',
++    message: 'O serviço não pôde gerar este vídeo.',
++  }));
++  const result = await waitForAvatarVideo('job-123', new AbortController().signal);
++  assert.equal(result.status, 'failed');
++  assert.equal(result.message, 'O serviço não pôde gerar este vídeo.');
++});
++
++test('network failure can be resumed by GET without generating a second video', async () => {
++  let calls = 0;
++  mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
++    assert.notEqual(init.method, 'POST');
++    if (++calls === 1) throw new TypeError('Network unavailable');
++    return Response.json(completedJob);
++  });
++  const signal = new AbortController().signal;
++  await assert.rejects(waitForAvatarVideo('job-123', signal), /Network unavailable/);
++  assert.equal((await waitForAvatarVideo('job-123', signal)).status, 'completed');
++  assert.equal(calls, 2);
++});
++
++test('abort during polling cancels the wait and prevents subsequent requests', async () => {
++  let calls = 0;
++  const controller = new AbortController();
++  mock.method(globalThis, 'fetch', async () => {
++    calls++;
++    setTimeout(() => controller.abort(), 0);
++    return Response.json(processingJob);
++  });
++  await assert.rejects(waitForAvatarVideo('job-123', controller.signal), { name: 'AbortError' });
++  assert.equal(calls, 1);
++});
++
++test('polling timeout preserves the job and does not submit a new request', async () => {
++  const fetchMock = mock.method(globalThis, 'fetch', async () => Response.json(processingJob));
++  await assert.rejects(
++    waitForAvatarVideo('job-123', new AbortController().signal, { timeoutMs: 0 }),
++    VideoPollingTimeout,
++  );
++  assert.equal(fetchMock.mock.callCount(), 0);
++});
++
++test('HTTP errors surface the backend message and status', async () => {
++  mock.method(globalThis, 'fetch', async () => Response.json({ success: false, message: 'Serviço não configurado.' }, { status: 503 }));
++  await assert.rejects(
++    generateAvatarVideo('image', 'request-123', new AbortController().signal),
++    (error: unknown) => error instanceof VideoApiError && error.status === 503 && error.message === 'Serviço não configurado.',
++  );
++});
++
++test('malformed API responses and a mismatched job cannot become playable videos', async () => {
++  const responses = [
++    new Response('<html>Proxy error</html>', { status: 502 }),
++    Response.json({ ...processingJob, status: 'completed' }),
++    Response.json({ ...completedJob, jobId: 'another-job' }),
++  ];
++  mock.method(globalThis, 'fetch', async () => responses.shift()!);
++  const signal = new AbortController().signal;
++  await assert.rejects(getAvatarVideoJob('job-123', signal), VideoApiError);
++  await assert.rejects(getAvatarVideoJob('job-123', signal), /resposta inválida/);
++  await assert.rejects(waitForAvatarVideo('job-123', signal), /diferente do solicitado/);
++});
+diff --git a/AvaFace/vite.config.ts b/AvaFace/vite.config.ts
+index 179524530bf0d1edf0e733d7587fcb4ae397cf5f..d4ef03c638ba35bad50ad6d1bec7f01ded8539c2 100644
+--- a/AvaFace/vite.config.ts
++++ b/AvaFace/vite.config.ts
+@@ -9,4 +9,10 @@ export default defineConfig({
+     babel({ presets: [reactCompilerPreset()] })
+   ],
+   base: '/AvaFaceAI---Project/',
++  server: {
++    proxy: {
++      '/api': 'http://localhost:3000',
++      '/generated': 'http://localhost:3000',
++    },
++  },
+ })
+diff --git a/README.md b/README.md
+index 6cb06bd830015605706fbf115bcf5915316a546d..11ac6defbb16a1534b76d5646142494f9daa589d 100644
+--- a/README.md
++++ b/README.md
+@@ -15,6 +15,16 @@
+ 
+ ---
+ 
++## Vídeo do avatar: integração com o front-end
++
++Depois de gerar a imagem do avatar, clique em **Gerar vídeo** no resultado. O front-end chama `generateAvatarVideo`, acompanha a geração e exibe o MP4 em um player. Avatar, chat e vídeo usam a mesma URL de backend configurável.
++
++O serviço de vídeo usa `gemini-omni-1.1-flash`, sucessor oficial dos modelos Veo 3.1 Preview desativados em 22/10/2026. Configure `GEMINI_API_KEY` exclusivamente no backend. Para GitHub Pages, configure também `VITE_API_BASE_URL` com a URL HTTPS do servidor Node.
++
++**[Configuração, endpoints, testes e limites da integração](docs/VIDEO_INTEGRATION.md)**
++
++---
++
+ ## 📌 Sobre o Projeto
+ 
+ O **AvaFace AI** é um projeto desenvolvido para a **Feira Internacional do Conhecimento (FINC)** com foco em **Inteligência Artificial, Visão Computacional e Geração de Imagens**.
+@@ -615,4 +625,4 @@ Além disso, modelos generativos podem modificar características da imagem orig
+ 
+ Se este projeto foi útil ou interessante para você, considere deixar uma ⭐ no repositório.
+ 
+-<p align="center"> Desenvolvido com ☕, código e Inteligência Artificial. </p> <p align="center"> <strong>AvaFace AI — FINC</strong> </p> ```
+\ No newline at end of file
++<p align="center"> Desenvolvido com ☕, código e Inteligência Artificial. </p> <p align="center"> <strong>AvaFace AI — FINC</strong> </p> ```
+diff --git a/docs/VIDEO_INTEGRATION.md b/docs/VIDEO_INTEGRATION.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..478b07001830119a2d18390e2e961bd13a1c4d16
+--- /dev/null
++++ b/docs/VIDEO_INTEGRATION.md
+@@ -0,0 +1,193 @@
++# Integração de vídeo do avatar
++
++## O que foi conectado
++
++Após o scan e a geração da imagem, a tela de resultado oferece o botão **Gerar vídeo**. Ele envia a imagem do avatar gerado para o backend, chama a função `generateAvatarVideo` e acompanha o trabalho até o MP4 estar disponível. O resultado inclui player com controles e link para abrir o vídeo.
++
++A geração depende de uma ação explícita no botão. Enquanto ela está em andamento, o botão fica desabilitado. Uma interrupção de rede permite **Retomar acompanhamento** da mesma solicitação. Ao iniciar um novo scan, as consultas anteriores são canceladas; isso não cancela uma geração já aceita pelo Google.
++
++### Modelo de vídeo
++
++Em **22/10/2026**, o Google desativou `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview` e `veo-3.1-lite-generate-preview` na Gemini API. O último era o modelo usado neste projeto. A integração utiliza o sucessor oficial **`gemini-omni-1.1-flash`**, por meio da Interactions API disponível no SDK `@google/genai` já instalado.
++
++O nome do módulo `veovideoservice.ts` e a função exportada `generateAvatarVideo` foram preservados para manter o caminho de integração. O prompt pede um vídeo curto em 9:16 e 720p, com movimento suave e a saudação “Olá!” em português brasileiro. Duração e resultado da fala dependem do modelo; o antigo parâmetro Veo `durationSeconds` não é enviado à API Omni.
++
++Fontes oficiais consultadas:
++
++- [Aviso de desligamento e sucessor](https://ai.google.dev/gemini-api/docs/video).
++- [Geração de vídeo com Gemini Omni Flash](https://ai.google.dev/gemini-api/docs/omni).
++- [Referência da Interactions API](https://ai.google.dev/api/interactions-api).
++
++## Executar localmente
++
++Use **Node.js 22.18 ou superior**, ou Node.js 24. Execute os comandos a partir da cópia atualizada do repositório.
++
++### 1. Backend
++
++```bash
++cd AvaFace/backend
++npm ci
++cp .env.example .env
++```
++
++No Windows sem `cp`, copie `.env.example` para `.env` usando o explorador ou `Copy-Item .env.example .env` no PowerShell.
++
++Preencha a chave somente em `AvaFace/backend/.env`:
++
++```dotenv
++GEMINI_API_KEY=sua_chave_do_google_ai_studio
++VIDEO_MODEL=gemini-omni-1.1-flash
++GEMINI_IMAGE_MODEL=gemini-nano-banana-2.1
++GEMINI_CHAT_MODEL=gemini-3.8-flash
++PORT=3000
++```
++
++A chave deve ter acesso ao modelo de vídeo e a conta deve permitir a utilização dessa API. Crie/consulte a chave no [Google AI Studio](https://aistudio.google.com/api-keys) e verifique a [disponibilidade e os preços dos modelos](https://ai.google.dev/gemini-api/docs/pricing). Não inclua a chave no front-end, no Git, ou em uma variável `VITE_`.
++
++O `HF_TOKEN` é opcional para os provedores alternativos de imagem já existentes; o fluxo Gemini de imagem, chat e vídeo usa `GEMINI_API_KEY`.
++
++```bash
++npm run dev
++```
++
++O servidor responde em `http://localhost:3000`. A ausência da chave não impede a inicialização: uma solicitação de vídeo retorna HTTP 503 com uma mensagem de configuração.
++
++### 2. Front-end, em outro terminal
++
++```bash
++cd AvaFace
++npm ci
++npm run dev
++```
++
++Abra a URL indicada pelo Vite, normalmente `http://localhost:5173/AvaFaceAI---Project/`. O proxy de desenvolvimento encaminha `/api` e `/generated` para `http://localhost:3000`.
++
++`VITE_API_BASE_URL` pode ficar vazia no desenvolvimento com esse proxy. Se o backend estiver em outro endereço ou porta, configure `AvaFace/.env.local`:
++
++```dotenv
++VITE_API_BASE_URL=http://localhost:4000
++```
++
++Informe a URL base do servidor, **sem `/api` no final**. Reinicie o Vite após modificar o ambiente.
++
++### 3. Usar a função
++
++1. Permita a câmera e conclua a captura guiada das três imagens.
++2. Aguarde a criação da imagem do avatar.
++3. Clique em **Gerar vídeo** na tela de resultado.
++4. Aguarde o status e reproduza o MP4 quando aparecer o player.
++
++O servidor recebe o avatar gerado, não uma nova captura da câmera. A imagem mantém seu MIME real (`image/png`, `image/jpeg` ou `image/webp`) ao passar da geração de imagem para a geração de vídeo.
++
++## GitHub Pages e servidor remoto
++
++O workflow existente publica os arquivos estáticos do front-end. O backend Express precisa executar em um serviço Node separado, com HTTPS, armazenamento gravável em `generated/` e tempo suficiente para concluir os trabalhos.
++
++No servidor do backend:
++
++```bash
++cd AvaFace/backend
++npm ci
++npm run build
++npm start
++```
++
++Configure as variáveis de ambiente no serviço de hospedagem. Para limitar CORS à origem do Pages, configure opcionalmente:
++
++```dotenv
++FRONTEND_ORIGIN=https://breno423.github.io
++```
++
++No GitHub, em **Settings → Secrets and variables → Actions → Variables**, crie a variável de repositório:
++
++```text
++VITE_API_BASE_URL=https://seu-backend.example.com
++```
++
++O workflow `.github/workflows/deploy.yml` passa essa variável ao build. Faça um novo build/deploy após mudar o endereço: variáveis `VITE_` são incorporadas ao JavaScript durante a compilação. Essa variável contém apenas a URL pública, nunca a chave do Google.
++
++O helper `apiUrl` é compartilhado pela geração de imagem, pelo chat e pelo vídeo. O MP4 também é resolvido no backend, evitando buscar `/generated` por engano no domínio do Pages.
++
++## Contrato da API
++
++### Criar um trabalho
++
++```http
++POST /api/avatar/generate-video
++Content-Type: application/json
++```
++
++```json
++{
++  "image": "data:image/png;base64,...",
++  "requestId": "88df6e49-a0e8-421d-9a5e-f030090b4ed3"
++}
++```
++
++`image` é obrigatória, tem limite de 10 MiB decodificados e deve ser PNG, JPEG ou WebP. O backend verifica base64 e a assinatura correspondente ao MIME. `requestId` é um UUID v4 opcional; o front-end sempre o envia e reutiliza o mesmo valor em uma reconexão. Durante a retenção do trabalho, repetir o identificador com a mesma imagem retorna o trabalho existente, sem outra chamada de geração. Reutilizá-lo para outra imagem retorna HTTP 409.
++
++Resposta HTTP **202**:
++
++```json
++{
++  "success": true,
++  "jobId": "identificador-do-trabalho",
++  "status": "processing"
++}
++```
++
++### Consultar o andamento
++
++```http
++GET /api/avatar/video-jobs/identificador-do-trabalho
++```
++
++O front-end consulta a cada cinco segundos. Enquanto o trabalho está em andamento, a resposta contém `status: "processing"`. Quando concluído:
++
++```json
++{
++  "success": true,
++  "jobId": "identificador-do-trabalho",
++  "status": "completed",
++  "videoUrl": "/generated/avatar-video-identificador.mp4"
++}
++```
++
++Se a geração falhar, a consulta responde HTTP 200 com `status: "failed"` e `message` em português. O campo `success` indica que a consulta foi atendida; o estado do vídeo está em `status`. Erros do provedor são tratados antes de chegar ao navegador, sem expor credenciais ou detalhes internos.
++
++| Resposta | Significado |
++| --- | --- |
++| 400 | Imagem ou identificador inválido. |
++| 404 na consulta | Trabalho inexistente, expirado ou perdido após reinício do servidor. |
++| 409 | Identificador já utilizado para outra imagem. |
++| 413 | Imagem acima do limite. |
++| 429 | Limite local de trabalhos simultâneos ou registros atingido. |
++| 503 na criação | API de vídeo não configurada. |
++
++## Testes e verificações
++
++Os testes usam respostas simuladas, sem consumir créditos do Google:
++
++```bash
++cd AvaFace/backend
++npm test
++npm run build
++```
++
++```bash
++cd AvaFace
++npm test
++npm run build
++```
++
++Eles cobrem envio da imagem, status, falha do provedor, validação, chave ausente, deduplicação, limite de concorrência, expiração, arquivos gerados, timeout, cancelamento de consultas e retomada sem novo POST. A geração real precisa ser conferida no ambiente com `GEMINI_API_KEY` configurada.
++
++O comando `npm run lint` da base original já apresenta erros em componentes de reconhecimento facial e em três serviços de imagem alternativos. Eles são independentes desta integração; os novos arquivos devem ser verificados separadamente se o lint global ainda estiver pendente.
++
++## Limites desta implementação
++
++- Os trabalhos e seus identificadores ficam na memória de **um processo**: máximo de dois trabalhos simultâneos, até 100 registros e retenção de uma hora após a conclusão. Reiniciar o backend perde o status; não apaga automaticamente os MP4 existentes.
++- Para múltiplas instâncias ou execução serverless, use uma fila e um armazenamento de trabalhos compartilhados antes de escalar. O fluxo atual pressupõe um servidor Node em execução contínua.
++- Os arquivos são salvos em `AvaFace/backend/generated/` quando o backend é iniciado nessa pasta. Configure persistência e retenção de arquivos conforme o ambiente; o TTL dos trabalhos não apaga os vídeos.
++- O serviço estabelece um limite de espera para a geração; o navegador pode interromper o acompanhamento e retomá-lo. Recarregar a página ou começar outro scan descarta o identificador mantido na interface.
++- A integração mantém o modelo de acesso existente do projeto, sem autenticação de usuários. CORS e o limite de concorrência não substituem autenticação e limites por usuário se o serviço for disponibilizado publicamente com uma chave paga.

@@ -9,4 +9,10 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] })
   ],
   base: '/AvaFaceAI---Project/',
+  server: {
+    proxy: {
+      '/api': 'http://localhost:3000',
+      '/generated': 'http://localhost:3000',
+    },
+  },
 })

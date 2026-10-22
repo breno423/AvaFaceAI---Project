@@ -23,26 +23,19 @@ interface AvatarRequest {
   style: string;
 }
 
-const apiKey = process.env.GEMINI_API_KEY;
-
-if (!apiKey) {
-  throw new Error(
-    'GEMINI_API_KEY não foi configurada no arquivo .env'
-  );
-}
-
-const client = new GoogleGenAI({
-  apiKey
-});
-
-// Modelo em uso. gemini-2.5-flash-image será desligado em 02/10/2026,
-// por isso já aponta para o sucessor. Se o 3.1 não estiver disponível
-// na sua conta/região ainda, troque para 'gemini-2.5-flash-image'.
-const MODEL_NAME = 'gemini-nano-banana-2.1';
+const MODEL_NAME = process.env.GEMINI_IMAGE_MODEL || 'gemini-nano-banana-2.1';
 
 export async function generateAvatarWithGemini(
   request: AvatarRequest
 ) {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY não foi configurada no arquivo .env');
+  }
+
+  const client = new GoogleGenAI({ apiKey });
+
   const {
     image,
     images,
@@ -160,6 +153,19 @@ Neutral, simple background.
     'base64'
   );
 
+  // Preserve o tipo real: a imagem também será enviada à API de vídeo.
+  const mimeType = imagePart.inlineData.mimeType;
+  const imageExtensions: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp'
+  };
+  const extension = imageExtensions[mimeType ?? ''];
+
+  if (!extension || !mimeType) {
+    throw new Error('Gemini retornou um formato de imagem não suportado.');
+  }
+
   const generatedDir = path.resolve(
     process.cwd(),
     'generated'
@@ -173,7 +179,7 @@ Neutral, simple background.
   );
 
   const fileName =
-    `gemini-avatar-${Date.now()}.jpg`;
+    `gemini-avatar-${Date.now()}.${extension}`;
 
   const filePath =
     path.join(
@@ -191,7 +197,7 @@ Neutral, simple background.
   );
 
   const generatedImage =
-    `data:image/jpeg;base64,${buffer.toString(
+    `data:${mimeType};base64,${buffer.toString(
       'base64'
     )}`;
 

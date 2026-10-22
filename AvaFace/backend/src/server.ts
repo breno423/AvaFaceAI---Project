@@ -10,14 +10,16 @@ import { generateAvatarWithInstantID } from './services/Instantidavatarservice.j
 import { generateAvatarWithPollinations } from './services/pollinationsavatarservice.js';
 import { generateAvatarWithPhotoMaker } from './services/photomakeravatarservice.js';
 import { generateAvatarWithPuLID } from './services/pulidavatarservice.js';
-import { generateAvatarVideo } from './services/veovideoservice.js';
+import { createAvatarVideoRouter } from './routes/avatarVideo.js';
 import { GoogleGenAI } from '@google/genai';
 
 const app = express();
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_ORIGIN || true
+}));
 
 app.use(
   express.json({
@@ -407,28 +409,7 @@ app.post(
   }
 );
 
-app.post('/api/avatar/generate-video', async (req, res) => {
-  const { image } = req.body;
-
-  if (typeof image !== 'string' || !image.startsWith('data:image/')) {
-    return res.status(400).json({
-      success: false,
-      message: 'Envie a imagem do avatar no campo image.'
-    });
-  }
-
-  try {
-    const result = await generateAvatarVideo(image);
-    return res.json(result);
-  } catch (error) {
-    console.error('Erro ao gerar vídeo com Veo:', error);
-
-    return res.status(500).json({
-      success: false,
-      message: 'Não foi possível gerar o vídeo do avatar.'
-    });
-  }
-});
+app.use('/api/avatar', createAvatarVideoRouter());
 
 
 /*
@@ -484,7 +465,7 @@ console.log('Diagnóstico da imagem:', {
 });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: process.env.GEMINI_CHAT_MODEL || 'gemini-3.8-flash',
       contents: [
         {
           role: 'user',
